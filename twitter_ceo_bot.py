@@ -166,8 +166,26 @@ def collect_and_save_cancer_tweets():
         "cancer is back", "recurrence of cancer", "cancer sucks",
         "anyone survived stage 4", "hope for cancer patients",
         "is there a cure for cancer", "clinical trials for cancer",
-        "alternative cancer treatment"
+        "alternative cancer treatment",
+
+        # Added keywords
+        "lung cancer diagnosis", "my friend has cancer", "brain tumor diagnosis",
+        "how do you survive cancer", "chemo journey", "radiation side effects",
+        "immunotherapy cancer", "cancer symptoms", "oncologist appointment",
+        "scared of cancer", "fear of chemo", "cancer prognosis", 
+        "can cancer be cured", "cancer came back", "cancer fight",
+        "how long do I have cancer", "lost my mom to cancer",
+        "lost my dad to cancer", "my partner has cancer", "cancer depression",
+        "colon cancer stage 3", "cancer recovery", "after chemo", 
+        "life after cancer", "post cancer journey", "rare cancer diagnosis",
+        "liver cancer stage 4", "thyroid cancer", "skin cancer update",
+        "pet scan cancer", "terminal illness support", "inoperable cancer",
+        "cancer pain relief", "palliative care cancer", "supporting cancer patients",
+        "talking to kids about cancer", "healing from cancer", 
+        "i’m scared of cancer", "dad passed from cancer", 
+        "she beat cancer", "miracle cancer recovery"
     ]
+
 
     sampled_keywords = random.sample(cancer_keywords, 8)
     ensure_file_exists(CANCER_TWEETS_PATH, ["tweet_id", "text", "created_at", "author_id"])
