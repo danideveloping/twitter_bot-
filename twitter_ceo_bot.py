@@ -204,7 +204,7 @@ def process_and_reply_to_cancer_tweets():
                 return
 
             try:
-                delay = random.uniform(20, 60)
+                delay = 120                 
                 print(f"⏳ Sleeping {int(delay)} seconds before posting...")
                 time.sleep(delay)
 
@@ -272,16 +272,14 @@ if __name__ == "__main__":
         else:
             print("🚫 Aborted. No replies sent.")
 
-    # Schedule next run
-    schedule.every(2).hours.do(lambda: [
-        collect_and_save_cancer_tweets(),
-        process_and_reply_to_cancer_tweets()
-    ])
-
     try:
         while True:
-            schedule.run_pending()
-            time.sleep(60)
+            collect_and_save_cancer_tweets()
+            process_and_reply_to_cancer_tweets()
+            print("⏳ Waiting 2 minutes for next tweet...")
+            time.sleep(120)  # 2-minute cooldown between full runs
     except KeyboardInterrupt:
         logger.info("Bot stopped by user.")
         print("Bot stopped.")
+
+
