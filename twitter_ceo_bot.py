@@ -167,8 +167,6 @@ def collect_and_save_cancer_tweets():
         "anyone survived stage 4", "hope for cancer patients",
         "is there a cure for cancer", "clinical trials for cancer",
         "alternative cancer treatment",
-
-        # Added keywords
         "lung cancer diagnosis", "my friend has cancer", "brain tumor diagnosis",
         "how do you survive cancer", "chemo journey", "radiation side effects",
         "immunotherapy cancer", "cancer symptoms", "oncologist appointment",
