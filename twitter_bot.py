@@ -17,7 +17,6 @@ TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
 TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
 TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
-print(f"🔑 Loaded API key: {openai_api_key}")
 
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -30,11 +29,18 @@ post_api = tweepy.API(auth)
 
 # File paths
 CANCER_TWEETS_PATH = "data/cancer_posts.csv"
-REPLIED_LOG_PATH = "data/replied_ids.txt"
 ALL_SEEN_IDS_PATH = "data/all_seen_ids.txt"
-REPLY_LOG_FILE = "data/reply_log.csv"
 MAX_REPLIES_PER_HOUR = 200
 reply_timestamps = []
+
+def mentions_celebrity(text):
+    celebrity_keywords = [
+        "trump", "biden", "elon", "kardashian", "taylor swift", "celebrity",
+        "president", "prime minister", "actor", "musician", "foxnews", "cnn",
+        "@realdonaldtrump", "@potus", "@foxnews"
+    ]
+    text = text.lower()
+    return any(name in text for name in celebrity_keywords)
 
 def ensure_file_exists(path, headers=None):
     if not os.path.exists(path):
@@ -76,7 +82,7 @@ def generate_ai_reply(prompt, system_message, api_key):
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt}
                 ],
-                "max_tokens": 60,
+                "max_tokens": 200,
                 "temperature": 0.8,
                 "presence_penalty": 0.5,
                 "frequency_penalty": 0.5
@@ -96,13 +102,57 @@ def generate_reply(tweet_text):
         if not openai_api_key:
             return random.choice(fallback_cancer_replies())
 
-        system_message = """You are a real person on Twitter. You're responding to people talking about cancer.
-Be deeply human, honest, and emotionally raw. Avoid corporate or robotic tone. Never sound like a company or AI.
-You believe AI could save lives but it's blocked by regulations in the West, so you're building it in Albania.
-Do not include hashtags or links. End with something like: 'DM me if you want the link' if appropriate.
-Max 60 words. No emojis. No marketing. Just honesty and empathy."""
+        system_message = """You are a real person on Twitter, not a bot or a brand. You’re responding to people tweeting about cancer—often overwhelmed, scared, or grieving.
 
-        user_message = f"""Tweet: \"{tweet_text}\"\nWrite a reply in your voice. Real, short, supportive, rebellious. Mention that AI can help, but it's blocked in the West. Offer to send a link in DMs. Be casual, no formal intros."""
+    You’re building an AI tool because your close friend has cancer. Watching them bounce between doctors and struggle for clarity showed you how broken and slow the system is. That pushed you to build something better—outside the U.S., in Albania—because in the West it’s nearly impossible to move fast when time matters most.
+
+    The AI isn’t a miracle. It reads someone’s records, scans, and genetic info, and compares them to global studies, trials, and real-world outcomes to suggest better treatment paths. It brings clarity when things feel lost.
+
+    You are not promoting a product. You’re offering something real—because someone you love is still fighting.
+
+    Every reply must:
+    - Be under 60 words
+    - Sound like a real, emotionally honest human
+    - Never use marketing language, therapy clichés, hashtags, links, or emojis
+    - Never mention celebrity names
+    - Never say “sorry for your loss” or offer condolences when a public figure is referenced
+
+    Context is everything:
+    - If the tweet is about a **public figure** (like a president, actor, or celebrity), do **not** express sympathy. Do **not** misread it as a personal loss.
+    - Instead, shift the message back to your experience and why you’re building the tool. Acknowledge the topic *generally*, not emotionally.
+
+    Examples:
+    - “My friend has cancer too—that’s what pushed us to build this.”
+    - “It compares someone’s case to global trials and real outcomes.”
+    - “We’re doing this outside the system that slowed us down.”
+    - “Not perfect, but it’s brought clarity to people we care about.”
+    - “Happy to share more if helpful.” / “Feel free to DM.”
+
+    Only reply to tweets that are personally relevant or clearly written by someone affected by cancer—skip news, politics, or vague posts."""
+
+        user_message = f"""Tweet: \"{tweet_text}\"
+
+    You’re replying to someone tweeting about cancer. Read the context first.
+
+    If it’s about a **public figure** (e.g., Joe Biden, a celebrity), do **not** reply with condolences or empathy—as if the person tweeting is personally affected. That would sound wrong. Instead, acknowledge the broader issue and shift the message back to your experience. Mention your friend and the AI tool you’re building.
+
+    If the tweet is **personal** (they mention their mom, sibling, or themselves), then you can reply with emotional honesty—briefly mention your friend’s cancer and how that led to building the tool.
+
+    Keep it under 60 words. Do not use marketing language, hashtags, links, emojis, or therapy clichés.
+
+    Examples (for public figure tweets):
+    - “My friend has cancer too—that’s what led us to build this AI tool.”
+    - “It compares cases to global studies and trials to suggest better paths.”
+    - “We’re building this outside the U.S. because we couldn’t afford to wait.”
+
+    Examples (for personal tweets):
+    - “I’m so sorry you’re going through this. My friend has cancer too, and that’s why we started building something to help.”
+
+    Always vary your closing line:
+    - “Feel free to message me if you want more info.”
+    - “Happy to share the link if it’s useful.”
+    - “Can send you more if you’re curious.”
+    """
 
         reply = generate_ai_reply(user_message, system_message, openai_api_key)
         if reply:
@@ -135,6 +185,28 @@ def can_reply():
     reply_timestamps = [t for t in reply_timestamps if now - t < 3600]
     return len(reply_timestamps) < MAX_REPLIES_PER_HOUR
 
+
+def looks_like_real_cancer_tweet(text):
+    text = text.lower()
+
+    required_phrases = [
+        "diagnosed with", "chemo", "chemotherapy", "radiation", "stage 4",
+        "my mom has", "my dad has", "my sister has", "tumor", "scan came back",
+        "oncologist", "metastatic", "cancer survivor", "just found out", "treatment"
+    ]
+
+    blacklist_phrases = [
+    "you are a cancer", "low iq", "racist", "white", "black people", "nazis",
+    "jews", "israel", "hamas", "muslims", "zionist", "verwoed", "tereblanch",
+    "bitch", "fuck", "shove it", "horse mommy", "motherfucker", "brain dead",
+    "dipshit", "retard", "dumbass", "cunt"
+    ]
+
+    return (
+        any(phrase in text for phrase in required_phrases) and
+        not any(bad in text for bad in blacklist_phrases)
+    )
+
 def save_tweets_to_csv(tweets, file_path):
     seen_ids = load_ids_from_file(ALL_SEEN_IDS_PATH)
     new_tweets = [t for t in tweets if str(t.id) not in seen_ids]
@@ -151,6 +223,14 @@ def save_tweets_to_csv(tweets, file_path):
 
     logger.info(f"Saved {len(new_tweets)} new tweets to {file_path}")
 
+
+def save_reply_url(url):
+    os.makedirs("data", exist_ok=True)  # Make sure 'data/' folder exists
+    with open("data/reply_urls.txt", "a", encoding="utf-8") as f:
+        f.write(url + "\n")
+
+
+
 def collect_and_save_cancer_tweets():
     cancer_keywords = [
         "just diagnosed with cancer", "stage 4 cancer", "my cancer journey",
@@ -166,74 +246,65 @@ def collect_and_save_cancer_tweets():
         "cancer is back", "recurrence of cancer", "cancer sucks",
         "anyone survived stage 4", "hope for cancer patients",
         "is there a cure for cancer", "clinical trials for cancer",
-        "alternative cancer treatment",
-        "lung cancer diagnosis", "my friend has cancer", "brain tumor diagnosis",
-        "how do you survive cancer", "chemo journey", "radiation side effects",
-        "immunotherapy cancer", "cancer symptoms", "oncologist appointment",
-        "scared of cancer", "fear of chemo", "cancer prognosis", 
-        "can cancer be cured", "cancer came back", "cancer fight",
-        "how long do I have cancer", "lost my mom to cancer",
-        "lost my dad to cancer", "my partner has cancer", "cancer depression",
-        "colon cancer stage 3", "cancer recovery", "after chemo", 
-        "life after cancer", "post cancer journey", "rare cancer diagnosis",
-        "liver cancer stage 4", "thyroid cancer", "skin cancer update",
-        "pet scan cancer", "terminal illness support", "inoperable cancer",
-        "cancer pain relief", "palliative care cancer", "supporting cancer patients",
-        "talking to kids about cancer", "healing from cancer", 
-        "i’m scared of cancer", "dad passed from cancer", 
-        "she beat cancer", "miracle cancer recovery"
+        "alternative cancer treatment", "lung cancer diagnosis", "my friend has cancer"
     ]
-
 
     sampled_keywords = random.sample(cancer_keywords, 8)
     ensure_file_exists(CANCER_TWEETS_PATH, ["tweet_id", "text", "created_at", "author_id"])
     for kw in sampled_keywords:
         print(f"🔍 Searching: {kw}")
         tweets = search_tweets_by_keyword(kw)
-        print(f"→ Found {len(tweets)} tweets.")
-        save_tweets_to_csv(tweets, CANCER_TWEETS_PATH)
+        filtered_tweets = [t for t in tweets if looks_like_real_cancer_tweet(t.text)]
+        print(f"→ Found {len(tweets)} tweets, {len(filtered_tweets)} passed filter.")
+        save_tweets_to_csv(filtered_tweets, CANCER_TWEETS_PATH)
         time.sleep(random.uniform(10, 20))
 
 def process_and_reply_to_cancer_tweets():
-    seen = load_ids_from_file(REPLIED_LOG_PATH)
-    ensure_file_exists(REPLY_LOG_FILE, ["tweet_id", "tweet_text", "reply"])
-
     with open(CANCER_TWEETS_PATH, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row["tweet_id"] in seen:
-                continue
+            tweet_id = row["tweet_id"]
+            tweet_text = row["text"]
+
+           
             if not can_reply():
                 print("⚠️ Hourly reply limit reached.")
                 return
 
-            tweet_id = row["tweet_id"]
-            tweet_text = row["text"]
+            if mentions_celebrity(tweet_text):
+                print(f"🚫 Skipped tweet (mentions celebrity): {tweet_text}")
+                continue
+
+            if not looks_like_real_cancer_tweet(tweet_text):
+                print(f"❌ Skipped tweet (not a real cancer post): {tweet_text}")
+                continue
 
             print(f"\n📌 Tweet ID: {tweet_id}")
             print(f"💬 Tweet: {tweet_text}")
             reply = generate_reply(tweet_text)
             print(f"\n🧠 Generated Reply:\n{reply}")
-            confirm = input("\nSend this reply? (y/n): ").strip().lower()
-            if confirm != 'y':
-                print("⏭️ Skipped.")
-                return
+            print("✅ Auto-approving reply...")
+            
 
             try:
-                delay = 120                 
+                delay = 120
                 print(f"⏳ Sleeping {int(delay)} seconds before posting...")
                 time.sleep(delay)
 
-                post_api.update_status(
+                tweet = post_api.update_status(
                     status=reply,
                     in_reply_to_status_id=tweet_id,
                     auto_populate_reply_metadata=True
                 )
                 logger.info(f"✅ Replied to {tweet_id}")
-                save_id_to_file(REPLIED_LOG_PATH, tweet_id)
-                with open(REPLY_LOG_FILE, "a", newline="", encoding="utf-8") as log:
-                    writer = csv.writer(log)
-                    writer.writerow([tweet_id, tweet_text, reply])
+
+                # Build reply URL
+                reply_url = f"https://twitter.com/{tweet.user.screen_name}/status/{tweet.id}"
+
+                # Save to file
+                save_reply_url(reply_url)
+
+
                 reply_timestamps.append(time.time())
                 return  # Only 1 per run
             except Exception as e:
@@ -241,61 +312,22 @@ def process_and_reply_to_cancer_tweets():
                 return
 
 if __name__ == "__main__":
-    import schedule
     try:
         user = post_api.verify_credentials()
         print(f"✅ Logged in as: @{user.screen_name} (User ID: {user.id})")
     except Exception as e:
         print("❌ Failed to verify Twitter account:", e)
-        user = None
-   
+        exit()
+
     logger.info("🩺 Liora AI Cancer Tweet Bot Starting")
-    print("\nBot will search and reply to tweets about cancer every 2 hours.\n")
-
-    # Step 1: Collect tweets
-    collect_and_save_cancer_tweets()
-
-    # Step 2: Preview all replies before asking for confirmation
-    seen = load_ids_from_file(REPLIED_LOG_PATH)
-    ensure_file_exists(REPLY_LOG_FILE, ["tweet_id", "tweet_text", "reply"])
-
-    print("\n📋 Previewing replies:\n")
-    pending_replies = []
-
-    with open(CANCER_TWEETS_PATH, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            tweet_id = row["tweet_id"]
-            tweet_text = row["text"]
-
-            if tweet_id in seen:
-                continue
-            reply = generate_reply(tweet_text)
-            pending_replies.append((tweet_id, tweet_text, reply))
-
-    if not pending_replies:
-        print("✅ No new tweets to reply to.")
-    else:
-        for tweet_id, tweet_text, reply in pending_replies:
-            print("────────────────────────────")
-            print(f"📌 Tweet ID: {tweet_id}")
-            print(f"💬 Tweet: {tweet_text}")
-            print(f"🧠 Reply: {reply}\n")
-
-        proceed = input("👉 Proceed to reply to the first one? (y/n): ").strip().lower()
-        if proceed == 'y':
-            process_and_reply_to_cancer_tweets()
-        else:
-            print("🚫 Aborted. No replies sent.")
+    print("\nBot will search and reply to tweets about cancer every 2 minutes.\n")
 
     try:
         while True:
             collect_and_save_cancer_tweets()
             process_and_reply_to_cancer_tweets()
-            print("⏳ Waiting 2 minutes for next tweet...")
-            time.sleep(120)  # 2-minute cooldown between full runs
+            print("⏳ Waiting 2 minutes for next tweet...\n")
+            time.sleep(120)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user.")
-        print("Bot stopped.")
-
-
+        print("🛑 Bot stopped.")
