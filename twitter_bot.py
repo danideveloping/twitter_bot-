@@ -299,11 +299,24 @@ def looks_like_real_cancer_tweet(text):
     """
     text = text.lower()
 
-    # Keywords that indicate genuine cancer discussion
+    # Keywords that indicate genuine cancer discussion (focusing on current patients, not survivors)
     required_phrases = [
         "diagnosed with", "chemo", "chemotherapy", "radiation", "stage 4",
         "my mom has", "my dad has", "my sister has", "tumor", "scan came back",
-        "oncologist", "metastatic", "cancer survivor", "just found out", "treatment"
+        "oncologist", "metastatic", "just found out", "treatment", "currently fighting",
+        "going through chemo", "on chemo", "starting chemo", "chemo side effects",
+        "radiation side effects", "treatment side effects", "cancer pain", "cancer symptoms",
+        "my cancer", "fighting cancer", "battling cancer", "cancer journey", "cancer battle",
+        "cancer treatment", "cancer therapy", "cancer medication", "cancer drugs",
+        "cancer surgery", "cancer operation", "cancer procedure", "cancer scan",
+        "cancer test", "cancer biopsy", "cancer results", "cancer update",
+        "cancer progress", "cancer status", "cancer condition", "cancer health",
+        "cancer recovery", "cancer healing", "cancer remission", "cancer relapse",
+        "cancer recurrence", "cancer spread", "cancer growth", "cancer tumor",
+        "cancer mass", "cancer lump", "cancer lesion", "cancer spot",
+        "cancer cell", "cancer tissue", "cancer organ", "cancer bone",
+        "cancer liver", "cancer lung", "cancer brain", "cancer blood",
+        "cancer lymph", "cancer node", "cancer gland", "cancer marrow"
     ]
 
     # Keywords that indicate spam, politics, or inappropriate content
@@ -314,9 +327,35 @@ def looks_like_real_cancer_tweet(text):
     "dipshit", "retard", "dumbass", "cunt"
     ]
 
+    # Keywords that indicate survivor content (to exclude)
+    survivor_phrases = [
+        "cancer survivor", "survived cancer", "beat cancer", "i beat cancer", 
+        "cancer free", "cancer-free", "no evidence of disease", "ned",
+        "survivor story", "survivor journey", "survivor experience",
+        "survivor life", "survivor tips", "survivor advice", "survivor support",
+        "survivor community", "survivor group", "survivor network",
+        "survivor celebration", "survivor anniversary", "survivor milestone",
+        "survivor victory", "survivor win", "survivor success", "survivor achievement",
+        "survivor inspiration", "survivor motivation", "survivor hope",
+        "survivor strength", "survivor courage", "survivor warrior",
+        "survivor fighter", "survivor hero", "survivor champion",
+        "survivor advocate", "survivor awareness", "survivor education",
+        "survivor research", "survivor fundraiser", "survivor event",
+        "survivor walk", "survivor run", "survivor race", "survivor marathon",
+        "survivor triathlon", "survivor challenge", "survivor campaign",
+        "survivor movement", "survivor mission", "survivor purpose",
+        "survivor legacy", "survivor impact", "survivor difference",
+        "survivor change", "survivor help", "survivor support",
+        "survivor care", "survivor love", "survivor family",
+        "survivor friend", "survivor team", "survivor crew",
+        "survivor squad", "survivor tribe", "survivor village",
+        "survivor nation", "survivor world", "survivor universe"
+    ]
+
     return (
         any(phrase in text for phrase in required_phrases) and
-        not any(bad in text for bad in blacklist_phrases)
+        not any(bad in text for bad in blacklist_phrases) and
+        not any(survivor in text for survivor in survivor_phrases)
     )
 
 def save_tweets_to_csv(tweets, file_path):
@@ -612,22 +651,32 @@ def collect_and_save_cancer_tweets():
         os.remove(ALL_SEEN_IDS_PATH)
         print("✅ Cleared all_seen_ids.txt")
     
-    # List of cancer-related keywords to search for
+    # List of cancer-related keywords to search for (focusing on current patients, not survivors)
     cancer_keywords = [
         "just diagnosed with cancer", "stage 4 cancer", "my cancer journey",
-        "cancer survivor", "cancer treatment advice", "chemo side effects",
-        "cancer trial", "breast cancer diagnosis", "pancreatic cancer help",
-        "is there hope for cancer", "cancer battle", "terminal cancer",
-        "fighting cancer", "cancer took my", "lost someone to cancer",
-        "i beat cancer", "my mom has cancer", "my dad has cancer",
-        "my sister has cancer", "my brother has cancer", "cancer pain",
-        "scan came back", "tumor found", "cancer diagnosis",
+        "cancer treatment advice", "chemo side effects", "cancer trial", 
+        "breast cancer diagnosis", "pancreatic cancer help", "cancer battle", 
+        "terminal cancer", "fighting cancer", "my mom has cancer", 
+        "my dad has cancer", "my sister has cancer", "my brother has cancer", 
+        "cancer pain", "scan came back", "tumor found", "cancer diagnosis",
         "metastatic cancer", "oncology appointment", "chemo started",
         "radiation treatment", "cancer support", "end of life care",
         "cancer is back", "recurrence of cancer", "cancer sucks",
-        "anyone survived stage 4", "hope for cancer patients",
-        "is there a cure for cancer", "clinical trials for cancer",
-        "alternative cancer treatment", "lung cancer diagnosis", "my friend has cancer"
+        "hope for cancer patients", "clinical trials for cancer",
+        "alternative cancer treatment", "lung cancer diagnosis", 
+        "my friend has cancer", "currently fighting cancer", "going through chemo",
+        "on chemo", "starting chemo", "chemo side effects", "radiation side effects",
+        "treatment side effects", "cancer symptoms", "my cancer", "battling cancer",
+        "cancer treatment", "cancer therapy", "cancer medication", "cancer drugs",
+        "cancer surgery", "cancer operation", "cancer procedure", "cancer scan",
+        "cancer test", "cancer biopsy", "cancer results", "cancer update",
+        "cancer progress", "cancer status", "cancer condition", "cancer health",
+        "cancer recovery", "cancer healing", "cancer remission", "cancer relapse",
+        "cancer recurrence", "cancer spread", "cancer growth", "cancer tumor",
+        "cancer mass", "cancer lump", "cancer lesion", "cancer spot",
+        "cancer cell", "cancer tissue", "cancer organ", "cancer bone",
+        "cancer liver", "cancer lung", "cancer brain", "cancer blood",
+        "cancer lymph", "cancer node", "cancer gland", "cancer marrow"
     ]
 
     # Randomly select 8 keywords to search (to avoid rate limits)
