@@ -4,10 +4,11 @@ import time
 import random
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 import requests
 from dotenv import load_dotenv
 import tweepy
+import schedule
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,14 +19,126 @@ TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
 TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 
+# Debug: Check if credentials are loaded
+print(f"🔑 Twitter API Key loaded: {'Yes' if TWITTER_API_KEY else 'No'}")
+print(f"🔑 Twitter API Secret loaded: {'Yes' if TWITTER_API_SECRET else 'No'}")
+print(f"🔑 Twitter Access Token loaded: {'Yes' if TWITTER_ACCESS_TOKEN else 'No'}")
+print(f"🔑 Twitter Access Secret loaded: {'Yes' if TWITTER_ACCESS_SECRET else 'No'}")
+print(f"🔑 Twitter Bearer Token loaded: {'Yes' if TWITTER_BEARER_TOKEN else 'No'}")
+
+# Check if all required credentials are present
+if not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET, TWITTER_BEARER_TOKEN]):
+    print("❌ ERROR: Missing Twitter API credentials!")
+    print("Please make sure your .env file contains:")
+    print("TWITTER_API_KEY=your_api_key")
+    print("TWITTER_API_SECRET=your_api_secret")
+    print("TWITTER_ACCESS_TOKEN=your_access_token")
+    print("TWITTER_ACCESS_SECRET=your_access_secret")
+    print("TWITTER_BEARER_TOKEN=your_bearer_token")
+    exit(1)
+
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger()
 
 # Initialize Twitter API clients
-# client: for searching tweets (read-only operations)
-# auth & post_api: for posting replies (write operations)
-client = tweepy.Client(bearer_token=TWITTER_BEARER_TOKEN)
+print("🔧 Initializing Twitter clients...")
+
+# Create separate clients for different purposes
+# Client for reading/searching tweets (using Bearer token)
+read_client = tweepy.Client(
+    bearer_token=TWITTER_BEARER_TOKEN,  # Add Bearer token for search endpoints
+    consumer_key=TWITTER_API_KEY,
+    consumer_secret=TWITTER_API_SECRET,
+    access_token=TWITTER_ACCESS_TOKEN,
+    access_token_secret=TWITTER_ACCESS_SECRET
+)
+
+# Client for posting replies (using same OAuth credentials + Bearer token for searching)
+write_client = tweepy.Client(
+    bearer_token=TWITTER_BEARER_TOKEN,  # Add Bearer token for search endpoints
+    consumer_key=TWITTER_API_KEY,
+    consumer_secret=TWITTER_API_SECRET,
+    access_token=TWITTER_ACCESS_TOKEN,
+    access_token_secret=TWITTER_ACCESS_SECRET
+)
+
+# Also keep the old API for compatibility
+auth = tweepy.OAuth1UserHandler(TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET)
+post_api = tweepy.API(auth)
+
+def show_diagnostic_info():
+    """Display current diagnostic information about Twitter credentials"""
+    print("\n🔧 CURRENT DIAGNOSTIC INFORMATION:")
+    print(f"   API Key: {TWITTER_API_KEY[:5]}..." if TWITTER_API_KEY else "❌ Missing")
+    print(f"   API Secret: {TWITTER_API_SECRET[:5]}..." if TWITTER_API_SECRET else "❌ Missing")
+    print(f"   Access Token: {TWITTER_ACCESS_TOKEN[:5]}..." if TWITTER_ACCESS_TOKEN else "❌ Missing")
+    print(f"   Access Secret: {TWITTER_ACCESS_SECRET[:5]}..." if TWITTER_ACCESS_SECRET else "❌ Missing")
+    print(f"   Bearer Token: {TWITTER_BEARER_TOKEN[:10]}..." if TWITTER_BEARER_TOKEN else "❌ Missing")
+    print(f"   Bot Username: {BOT_USERNAME if 'BOT_USERNAME' in globals() else 'Not set'}")
+    print(f"   Bot User ID: {BOT_USER_ID if 'BOT_USER_ID' in globals() else 'Not set'}")
+    print()
+
+# Test the clients
+try:
+    print("🔧 Testing Twitter clients...")
+    
+    # Test read client (OAuth credentials)
+    print("🔧 Testing read client (OAuth)...")
+    try:
+        test_search = read_client.search_recent_tweets(query="test", max_results=10)
+        print("✅ Read client works")
+    except tweepy.Unauthorized as e:
+        print(f"❌ Read client failed: 401 Unauthorized - {e}")
+        print("⚠️  OAuth credentials may be invalid or expired")
+        print("⚠️  Possible causes:")
+        print("   - API Key/Secret are incorrect")
+        print("   - Access Token/Secret are incorrect")
+        print("   - Tokens have expired")
+        print("   - Account doesn't have proper permissions")
+        print("   - API plan doesn't include search endpoints")
+    except Exception as e:
+        print(f"❌ Read client failed: {e}")
+    
+    # Test write client (OAuth credentials)
+    print("🔧 Testing write client (OAuth)...")
+    try:
+        me = write_client.get_me()
+        if me.data:
+            print(f"✅ Write client works: @{me.data.username}")
+            BOT_USERNAME = me.data.username
+            BOT_USER_ID = me.data.id
+            
+            # Test if write client can also search (as backup)
+            try:
+                test_search_write = write_client.search_recent_tweets(query="test", max_results=10)
+                print("✅ Write client can also search (backup available)")
+            except Exception as e:
+                print(f"⚠️  Write client cannot search: {e}")
+                print("⚠️  Will need to fix API permissions for searching")
+        else:
+            print("❌ Write client failed - no user data returned")
+            raise Exception("No user data returned")
+    except tweepy.Unauthorized as e:
+        print(f"❌ Write client failed: 401 Unauthorized - {e}")
+        print("⚠️  OAuth credentials may be invalid or expired")
+        show_diagnostic_info()
+        print("💡 SOLUTIONS TO TRY:")
+        print("1. Regenerate all Twitter API credentials in your Twitter Developer Portal")
+        print("2. Make sure you have the correct API plan (Basic, Pro, or Enterprise)")
+        print("3. Ensure your app has the required permissions (Read and Write)")
+        print("4. Check that your .env file is in the correct location")
+        print("5. Verify that the credentials are copied correctly (no extra spaces)")
+        exit(1)
+    except Exception as e:
+        print(f"❌ Write client failed: {e}")
+        exit(1)
+        
+except Exception as e:
+    print(f"❌ Twitter client test failed: {e}")
+    exit(1)
+
+# Keep the old API for compatibility with some functions
 auth = tweepy.OAuth1UserHandler(TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET)
 post_api = tweepy.API(auth)
 
@@ -55,9 +168,61 @@ def mentions_celebrity(text):
         bool: True if celebrity is mentioned, False otherwise
     """
     celebrity_keywords = [
-        "trump", "biden", "elon", "kardashian", "taylor swift", "celebrity",
-        "president", "prime minister", "actor", "musician", "foxnews", "cnn",
-        "@realdonaldtrump", "@potus", "@foxnews"
+        # Political figures
+        "trump", "biden", "obama", "clinton", "bush", "reagan", "carter", "ford", "nixon",
+        "kamala", "harris", "pence", "mike pence", "pelosi", "mcconnell", "schumer",
+        "aoc", "alexandria ocasio-cortez", "bernie", "sanders", "warren", "elizabeth warren",
+        "desantis", "ron desantis", "haley", "nikki haley", "christie", "chris christie",
+        "ramaswamy", "vivek", "scott", "tim scott", "binkley", "ryan binkley",
+        
+        # Entertainment celebrities
+        "elon", "musk", "elon musk", "kardashian", "kim kardashian", "kylie jenner",
+        "taylor swift", "beyonce", "jay z", "jay-z", "rihanna", "adele", "lady gaga",
+        "justin bieber", "drake", "post malone", "ed sheeran", "bruno mars",
+        "tom hanks", "julia roberts", "brad pitt", "angelina jolie", "leonardo dicaprio",
+        "meryl streep", "denzel washington", "sandra bullock", "george clooney",
+        "jennifer lawrence", "chris hemsworth", "scarlett johansson", "robert downey jr",
+        "chris evans", "mark ruffalo", "jeremy renner", "chris pratt", "tom holland",
+        "zendaya", "timothee chalamet", "florence pugh", "anya taylor-joy",
+        
+        # Sports figures
+        "lebron", "lebron james", "michael jordan", "kobe bryant", "kobe",
+        "tom brady", "cristiano ronaldo", "ronaldo", "messi", "lionel messi",
+        "serena williams", "venus williams", "tiger woods", "mike tyson",
+        "floyd mayweather", "conor mcgregor", "ufc", "nba", "nfl", "mlb", "nhl",
+        
+        # Business figures
+        "jeff bezos", "bezos", "bill gates", "gates", "mark zuckerberg", "zuckerberg",
+        "tim cook", "cook", "sundar pichai", "pichai", "satya nadella", "nadella",
+        "warren buffett", "buffett", "charles koch", "koch", "george soros", "soros",
+        
+        # Media personalities
+        "oprah", "oprah winfrey", "ellen", "ellen degeneres", "jimmy kimmel",
+        "jimmy fallon", "stephen colbert", "trevor noah", "john oliver",
+        "bill maher", "seth meyers", "james corden", "graham norton",
+        "anderson cooper", "rachel maddow", "tucker carlson", "sean hannity",
+        "laura ingraham", "jeanine pirro", "jesse watters", "greg gutfeld",
+        
+        # News organizations
+        "foxnews", "cnn", "msnbc", "abc", "cbs", "nbc", "pbs", "npr",
+        "bbc", "reuters", "associated press", "ap", "bloomberg", "cnbc",
+        
+        # Social media personalities
+        "mrbeast", "mr beast", "pewdiepie", "pew die pie", "logan paul",
+        "jake paul", "ksi", "sidemen", "david dobrik", "casey neistat",
+        "marques brownlee", "mkbhd", "linus tech tips", "philip defranco",
+        
+        # Generic terms
+        "celebrity", "celebrities", "famous", "star", "stars", "actor", "actress",
+        "singer", "rapper", "athlete", "player", "coach", "president", "prime minister",
+        "governor", "senator", "congressman", "congresswoman", "representative",
+        "mayor", "ceo", "founder", "influencer", "youtuber", "streamer",
+        
+        # Specific handles
+        "@realdonaldtrump", "@potus", "@foxnews", "@cnn", "@msnbc", "@abc", "@cbs",
+        "@nbc", "@bbc", "@reuters", "@ap", "@bloomberg", "@cnbc", "@elonmusk",
+        "@taylorswift13", "@beyonce", "@rihanna", "@adele", "@ladygaga",
+        "@justinbieber", "@drake", "@postmalone", "@edsheeran", "@brunomars"
     ]
     text = text.lower()
     return any(name in text for name in celebrity_keywords)
@@ -133,7 +298,7 @@ def check_for_responses():
             return []
         
         # Get mentions of the bot
-        mentions = client.get_users_mentions(
+        mentions = read_client.get_users_mentions(
             id=bot_user_id,
             tweet_fields=["id", "text", "created_at", "author_id", "in_reply_to_user_id"],
             max_results=50
@@ -164,7 +329,7 @@ def get_tweet_engagement(tweet_id):
         dict: Engagement metrics (likes, retweets, replies)
     """
     try:
-        tweet = client.get_tweet(
+        tweet = read_client.get_tweet(
             id=tweet_id,
             tweet_fields=["public_metrics"]
         )
@@ -505,12 +670,36 @@ def generate_reply(tweet_text):
     Every reply must:
     - Be under 50 words (to leave room for call-to-action)
     - Be under 100 characters (to leave room for call-to-action)
-    - Sound like a real, emotionally honest human
+    - Sound like a real, emotionally honest human talking to a friend
     - Never use marketing language, therapy clichés, hashtags, links, or emojis
     - Never mention celebrity names
     - Never say "sorry for your loss" or offer condolences when a public figure is referenced
     - Be completely unique and different from other replies
     - DO NOT include any call-to-action phrases - the system will add them automatically
+    - Feel natural and conversational, not like advertising
+
+    CONVERSION STRATEGIES (make it feel like talking to a friend):
+
+    1. NATURAL CONVERSATION:
+    - Share personal experience: "My friend's cancer journey inspired this"
+    - Be honest about limitations: "It's not a miracle, but it helps"
+    - Talk like a friend would: "I built this because I saw how broken the system is"
+    - Show genuine care: "Watching someone struggle with this is heartbreaking"
+
+    2. ORGANIC SOCIAL PROOF:
+    - Mention real results: "It's helped people find treatments their doctors missed"
+    - Share what you've seen: "I've watched families get clarity when they felt lost"
+    - Be specific but humble: "A few hundred people have used it so far"
+
+    3. NATURAL URGENCY:
+    - Be honest about time: "Cancer doesn't wait, and neither should treatment decisions"
+    - Share your motivation: "That's why I built it outside the US - we couldn't wait"
+    - Express genuine concern: "Every day matters when you're fighting this"
+
+    4. ADDRESS REAL STRUGGLES:
+    - Acknowledge the chaos: "The system is so broken and slow"
+    - Validate their experience: "I know how overwhelming this feels"
+    - Offer genuine help: "This tool brings some clarity when things feel hopeless"
 
     Context is everything:
     - If the tweet is about a **public figure** (like a president, actor, or celebrity), do **not** express sympathy. Do **not** misread it as a personal loss.
@@ -557,14 +746,21 @@ def generate_reply(tweet_text):
 
         # Add call-to-action at the end
         call_to_actions = [
-            "DM me if you want the link.",
-            "Feel free to reach out if interested.",
-            "DM me for the link.",
-            "Let me know if you want the link.",
-            "DM me if you're curious.",
-            "Feel free to message me for the link.",
             "DM me if you want to see it.",
-            "Let me know if you want more info."
+            "Let me know if you're interested.",
+            "DM me and I'll share the link.",
+            "Feel free to reach out if you want to check it out.",
+            "DM me if you'd like to see what it does.",
+            "Let me know if you want the link.",
+            "DM me and I'll send it over.",
+            "Feel free to message me if you're curious.",
+            "DM me if you want to take a look.",
+            "Let me know if you'd like to see it.",
+            "DM me and I'll share it with you.",
+            "Feel free to reach out if you want the link.",
+            "DM me if you're interested in seeing it.",
+            "Let me know if you want to check it out.",
+            "DM me and I'll send you the link."
         ]
         
         # Choose a random call-to-action
@@ -586,6 +782,7 @@ def generate_reply(tweet_text):
 def search_tweets_by_keyword(keyword, count=30):
     """
     Search Twitter for tweets containing specific keywords.
+    Focuses on people who just got diagnosed with cancer.
     
     Args:
         keyword (str): The keyword to search for
@@ -595,19 +792,47 @@ def search_tweets_by_keyword(keyword, count=30):
         list: List of tweet objects, or empty list if failed
     """
     try:
-        query = f"{keyword} lang:en -is:retweet"  # English tweets only, exclude retweets
-        response = client.search_recent_tweets(
-            query=query,
-            tweet_fields=["id", "text", "created_at", "author_id"],
-            max_results=min(count, 100)
-        )
-        return response.data if response.data else []
-    except tweepy.TooManyRequests:
-        logger.warning(f"Rate limit hit for keyword: {keyword}. Sleeping for 15 minutes.")
-        time.sleep(900)  # Wait 15 minutes
-        return []
+        # Search for cancer diagnosis tweets
+        query = f"{keyword} lang:en -is:retweet"
+        print(f"🔍 Searching for: {query}")
+        
+        # Use write_client since read_client is failing
+        try:
+            response = write_client.search_recent_tweets(
+                query=query,
+                tweet_fields=["id", "text", "created_at", "author_id"],
+                max_results=min(count, 100)
+            )
+            
+            if response and response.data:
+                # Sort by recency (most recent first) but don't filter by time
+                tweets = list(response.data)
+                tweets.sort(key=lambda x: x.created_at, reverse=True)
+                print(f"✅ Found {len(tweets)} tweets for keyword: {keyword}")
+                return tweets[:count]
+            else:
+                print(f"❌ No tweets found for keyword: {keyword}")
+                return []
+                
+        except tweepy.Unauthorized as e:
+            print(f"❌ API unauthorized for searching '{keyword}': {e}")
+            print("⚠️  This suggests the OAuth credentials don't have search permissions")
+            return []
+        except tweepy.Forbidden as e:
+            print(f"❌ API forbidden for searching '{keyword}': {e}")
+            print("⚠️  This suggests insufficient permissions")
+            return []
+        except tweepy.TooManyRequests:
+            logger.warning(f"Rate limit hit for keyword: {keyword}. Sleeping for 15 minutes.")
+            time.sleep(900)  # Wait 15 minutes
+            return []
+        except Exception as e:
+            print(f"❌ API search failed for '{keyword}': {e}")
+            return []
+        
     except Exception as e:
         logger.error(f"Twitter search failed for '{keyword}': {e}")
+        print(f"❌ Search function error for '{keyword}': {e}")
         return []
 
 def can_reply():
@@ -645,77 +870,155 @@ def can_reply():
     
     return hourly_limit_ok and daily_limit_ok
 
-def looks_like_real_cancer_tweet(text):
+def is_recent_diagnosis_tweet(tweet_text):
     """
-    Filter tweets to find genuine cancer-related posts.
-    Uses keyword matching to identify real cancer discussions vs. spam/politics.
+    Check if a tweet indicates a recent cancer diagnosis.
+    Prioritizes tweets from people who just found out they have cancer.
     
     Args:
-        text (str): Tweet text to analyze
+        tweet_text (str): The tweet text to analyze
         
     Returns:
-        bool: True if it looks like a real cancer tweet, False otherwise
+        tuple: (is_recent_diagnosis, priority_score)
     """
-    text = text.lower()
-
-    # Keywords that indicate genuine cancer discussion (focusing on current patients, not survivors)
-    required_phrases = [
-        "diagnosed with", "chemo", "chemotherapy", "radiation", "stage 4",
-        "my mom has", "my dad has", "my sister has", "tumor", "scan came back",
-        "oncologist", "metastatic", "just found out", "treatment", "currently fighting",
-        "going through chemo", "on chemo", "starting chemo", "chemo side effects",
-        "radiation side effects", "treatment side effects", "cancer pain", "cancer symptoms",
-        "my cancer", "fighting cancer", "battling cancer", "cancer journey", "cancer battle",
-        "cancer treatment", "cancer therapy", "cancer medication", "cancer drugs",
-        "cancer surgery", "cancer operation", "cancer procedure", "cancer scan",
-        "cancer test", "cancer biopsy", "cancer results", "cancer update",
-        "cancer progress", "cancer status", "cancer condition", "cancer health",
-        "cancer recovery", "cancer healing", "cancer remission", "cancer relapse",
-        "cancer recurrence", "cancer spread", "cancer growth", "cancer tumor",
-        "cancer mass", "cancer lump", "cancer lesion", "cancer spot",
-        "cancer cell", "cancer tissue", "cancer organ", "cancer bone",
-        "cancer liver", "cancer lung", "cancer brain", "cancer blood",
-        "cancer lymph", "cancer node", "cancer gland", "cancer marrow"
+    tweet_lower = tweet_text.lower()
+    
+    # HIGHEST PRIORITY: Just diagnosed keywords
+    just_diagnosed_keywords = [
+        "just diagnosed", "just found out", "just got diagnosed", "just learned",
+        "diagnosis today", "found out today", "got the news", "just got the news",
+        "test results today", "biopsy results today", "scan results today",
+        "cancer confirmed today", "positive today", "results came back"
     ]
+    
+    # HIGH PRIORITY: Immediate reaction keywords
+    immediate_reaction_keywords = [
+        "i have cancer", "my cancer", "diagnosed with cancer", "cancer diagnosis",
+        "cancer positive", "cancer confirmed", "cancer detected", "cancer found"
+    ]
+    
+    # MEDIUM PRIORITY: Family recent diagnosis
+    family_recent_keywords = [
+        "my mom just", "my dad just", "my sister just", "my brother just",
+        "my wife just", "my husband just", "my child just", "my friend just",
+        "mom diagnosed", "dad diagnosed", "sister diagnosed", "brother diagnosed"
+    ]
+    
+    # Check for just diagnosed (highest priority)
+    for keyword in just_diagnosed_keywords:
+        if keyword in tweet_lower:
+            return True, 10  # Highest priority score
+    
+    # Check for immediate reaction (high priority)
+    for keyword in immediate_reaction_keywords:
+        if keyword in tweet_lower:
+            return True, 8  # High priority score
+    
+    # Check for family recent diagnosis (medium priority)
+    for keyword in family_recent_keywords:
+        if keyword in tweet_lower and ("cancer" in tweet_lower or "diagnosed" in tweet_lower):
+            return True, 6  # Medium priority score
+    
+    # Check for time indicators (medium priority)
+    time_indicators = ["today", "yesterday", "this week", "this month", "recently", "just"]
+    has_time_indicator = any(indicator in tweet_lower for indicator in time_indicators)
+    has_cancer_mention = "cancer" in tweet_lower or "diagnosed" in tweet_lower
+    
+    if has_time_indicator and has_cancer_mention:
+        return True, 5  # Medium priority score
+    
+    return False, 0
 
-    # Keywords that indicate spam, politics, or inappropriate content
+def looks_like_real_cancer_tweet(tweet_text):
+    """
+    Enhanced function to check if a tweet looks like a real cancer-related post.
+    Now prioritizes recent diagnosis tweets.
+    
+    Args:
+        tweet_text (str): The tweet text to analyze
+        
+    Returns:
+        tuple: (is_valid, priority_score)
+    """
+    tweet_lower = tweet_text.lower()
+    
+    # First check if it's a recent diagnosis (highest priority)
+    is_recent, priority = is_recent_diagnosis_tweet(tweet_text)
+    if is_recent:
+        return True, priority
+    
+    # Check for offensive or inappropriate content
     blacklist_phrases = [
-    "you are a cancer", "low iq", "racist", "white", "black people", "nazis",
-    "jews", "israel", "hamas", "muslims", "zionist", "verwoed", "tereblanch",
-    "bitch", "fuck", "shove it", "horse mommy", "motherfucker", "brain dead",
-    "dipshit", "retard", "dumbass", "cunt"
+        # Offensive language
+        "fuck cancer", "cancer sucks", "f cancer", "f*ck cancer", "cancer is bullshit",
+        "cancer is stupid", "cancer is dumb", "cancer is ridiculous", "cancer is awful",
+        "cancer is terrible", "cancer is horrible", "cancer is disgusting",
+        
+        # Political content
+        "trump", "biden", "republican", "democrat", "liberal", "conservative",
+        "politics", "political", "election", "vote", "voting", "campaign",
+        "government", "congress", "senate", "house", "president", "administration",
+        
+        # Conspiracy theories
+        "conspiracy", "conspiracy theory", "fake news", "hoax", "scam",
+        "big pharma", "pharmaceutical", "drug companies", "medical establishment",
+        "cover up", "hidden", "secret", "truth", "wake up", "sheeple",
+        
+        # Hate speech and violence
+        "kill", "murder", "death", "die", "dead", "suicide", "self harm",
+        "hate", "racist", "racism", "sexist", "sexism", "homophobic", "transphobic",
+        "nazi", "fascist", "terrorist", "extremist", "radical",
+        
+        # Spam and marketing
+        "buy now", "limited time", "act now", "don't miss out", "exclusive offer",
+        "special price", "discount", "sale", "promotion", "deal", "offer",
+        "click here", "visit our website", "check out", "order now",
+        
+        # Inappropriate medical content
+        "cure cancer", "cancer cure", "miracle cure", "natural cure", "alternative cure",
+        "cancer treatment scam", "fake treatment", "bogus treatment", "quack treatment",
+        "cancer conspiracy", "cancer hoax", "cancer scam",
+        
+        # Religious extremism
+        "god's plan", "divine punishment", "sin", "punishment", "karma",
+        "religious", "spiritual", "faith healing", "prayer healing", "miracle healing",
+        
+        # Adult content
+        "porn", "pornography", "adult", "nsfw", "explicit", "sexual", "sex",
+        "nude", "naked", "intimate", "private", "personal",
+        
+        # General non-medical topics
+        "sports", "football", "basketball", "baseball", "soccer", "tennis",
+        "golf", "hockey", "wrestling", "boxing", "mma", "ufc",
+        "entertainment", "movie", "film", "tv show", "television", "series",
+        "music", "song", "album", "concert", "tour", "performance",
+        "gaming", "video game", "game", "playstation", "xbox", "nintendo",
+        "technology", "tech", "computer", "software", "hardware", "app",
+        "business", "company", "corporate", "marketing", "advertising", "brand",
+        "fashion", "style", "clothing", "outfit", "dress", "shoes", "accessories",
+        "food", "recipe", "cooking", "restaurant", "dining", "cuisine",
+        "travel", "vacation", "trip", "holiday", "destination", "hotel",
+        "automotive", "car", "vehicle", "truck", "motorcycle", "transportation"
     ]
-
-    # Keywords that indicate survivor content (to exclude)
-    survivor_phrases = [
-        "cancer survivor", "survived cancer", "beat cancer", "i beat cancer", 
-        "cancer free", "cancer-free", "no evidence of disease", "ned",
-        "survivor story", "survivor journey", "survivor experience",
-        "survivor life", "survivor tips", "survivor advice", "survivor support",
-        "survivor community", "survivor group", "survivor network",
-        "survivor celebration", "survivor anniversary", "survivor milestone",
-        "survivor victory", "survivor win", "survivor success", "survivor achievement",
-        "survivor inspiration", "survivor motivation", "survivor hope",
-        "survivor strength", "survivor courage", "survivor warrior",
-        "survivor fighter", "survivor hero", "survivor champion",
-        "survivor advocate", "survivor awareness", "survivor education",
-        "survivor research", "survivor fundraiser", "survivor event",
-        "survivor walk", "survivor run", "survivor race", "survivor marathon",
-        "survivor triathlon", "survivor challenge", "survivor campaign",
-        "survivor movement", "survivor mission", "survivor purpose",
-        "survivor legacy", "survivor impact", "survivor difference",
-        "survivor change", "survivor help", "survivor support",
-        "survivor care", "survivor love", "survivor family",
-        "survivor friend", "survivor team", "survivor crew",
-        "survivor squad", "survivor tribe", "survivor village",
-        "survivor nation", "survivor world", "survivor universe"
+    
+    for phrase in blacklist_phrases:
+        if phrase in tweet_lower:
+            return False, 0
+    
+    # Check for cancer-related keywords
+    cancer_keywords = [
+        "cancer", "diagnosed", "diagnosis", "oncologist", "oncology",
+        "chemo", "chemotherapy", "radiation", "treatment", "tumor", "tumour",
+        "biopsy", "scan", "mri", "ct scan", "pet scan", "mammogram",
+        "stage", "metastatic", "terminal", "remission", "relapse"
     ]
-
-    return (
-        any(phrase in text for phrase in required_phrases) and
-        not any(bad in text for bad in blacklist_phrases) and
-        not any(survivor in text for survivor in survivor_phrases)
-    )
+    
+    has_cancer_keyword = any(keyword in tweet_lower for keyword in cancer_keywords)
+    
+    if has_cancer_keyword:
+        return True, 3  # Lower priority for general cancer tweets
+    
+    return False, 0
 
 def save_tweets_to_csv(tweets, file_path):
     """
@@ -893,7 +1196,7 @@ def get_pending_replies():
 
 def post_reply(tweet_id, reply_text):
     """
-    Post a reply to Twitter.
+    Post a reply to Twitter using v2 API.
     
     Args:
         tweet_id (str): ID of the tweet to reply to
@@ -903,22 +1206,59 @@ def post_reply(tweet_id, reply_text):
         bool: True if successful, False otherwise
     """
     try:
-        # Post the reply
-        tweet = post_api.update_status(
-            status=reply_text,
-            in_reply_to_status_id=tweet_id,
-            auto_populate_reply_metadata=True
+        # Check if we have write access
+        if not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]):
+            print("❌ Cannot post reply: Read-only API access")
+            print("💡 Your Twitter API plan only allows reading tweets, not posting")
+            print("💡 To enable posting, you need:")
+            print("   - OAuth credentials (API Key, Secret, Access Token, Access Secret)")
+            print("   - Twitter app with 'Read and Write' permissions")
+            print("   - Paid Twitter API plan (Basic or higher)")
+            return False
+        
+        # Debug: Check if client is properly initialized
+        if not write_client:
+            print("❌ Twitter write client is not initialized")
+            return False
+            
+        # Debug: Check if we have the required credentials for posting
+        if not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]):
+            print("❌ Missing Twitter API credentials for posting")
+            print(f"API Key: {'Present' if TWITTER_API_KEY else 'Missing'}")
+            print(f"API Secret: {'Present' if TWITTER_API_SECRET else 'Missing'}")
+            print(f"Access Token: {'Present' if TWITTER_ACCESS_TOKEN else 'Missing'}")
+            print(f"Access Secret: {'Present' if TWITTER_ACCESS_SECRET else 'Missing'}")
+            return False
+        
+        print(f"📤 Attempting to post reply to tweet {tweet_id}...")
+        print(f"📝 Reply text: {reply_text[:50]}...")
+        
+        # Post the reply using v2 API
+        response = write_client.create_tweet(
+            text=reply_text,
+            in_reply_to_tweet_id=tweet_id
         )
         
-        # Build reply URL
-        reply_url = f"https://twitter.com/{tweet.user.screen_name}/status/{tweet.id}"
+        if not response.data:
+            print(f"❌ No response data from Twitter API")
+            return False
+        
+        reply_tweet_id = response.data['id']
+        
+        # Build reply URL using the bot's username
+        try:
+            user = post_api.verify_credentials()
+            reply_url = f"https://twitter.com/{user.screen_name}/status/{reply_tweet_id}"
+        except Exception as e:
+            print(f"⚠️ Could not get username, using generic URL: {e}")
+            reply_url = f"https://twitter.com/i/status/{reply_tweet_id}"
         
         # Save to reply_urls.txt
         save_reply_url(reply_url)
         
         # Save detailed reply information
         # Get original tweet text from the tweet we're replying to
-        original_tweet = client.get_tweet(id=tweet_id)
+        original_tweet = read_client.get_tweet(id=tweet_id)
         original_tweet_text = original_tweet.data.text if original_tweet.data else "Original tweet not found"
         
         save_posted_reply_details(
@@ -926,7 +1266,7 @@ def post_reply(tweet_id, reply_text):
             original_tweet_text=original_tweet_text,
             reply_text=reply_text,
             reply_url=reply_url,
-            reply_tweet_id=str(tweet.id)
+            reply_tweet_id=str(reply_tweet_id)
         )
         
         # Update preview status
@@ -934,16 +1274,30 @@ def post_reply(tweet_id, reply_text):
         
         # Track engagement metrics for the posted reply
         print(f"📊 Tracking engagement metrics...")
-        metrics = get_tweet_engagement(str(tweet.id))
-        save_engagement_metrics(str(tweet.id), metrics)
+        metrics = get_tweet_engagement(str(reply_tweet_id))
+        save_engagement_metrics(str(reply_tweet_id), metrics)
         
         print(f"✅ Successfully posted reply!")
         print(f"🔗 Reply URL: {reply_url}")
         print(f"📈 Initial engagement: ❤️ {metrics.get('likes', 0)} 🔄 {metrics.get('retweets', 0)} 💬 {metrics.get('replies', 0)}")
         return True
         
+    except tweepy.Unauthorized as e:
+        print(f"❌ Twitter API Unauthorized: {e}")
+        print("This usually means your API credentials are invalid or expired.")
+        return False
+    except tweepy.Forbidden as e:
+        print(f"❌ Twitter API Forbidden: {e}")
+        print("This usually means your account doesn't have permission to post.")
+        return False
+    except tweepy.TooManyRequests as e:
+        print(f"❌ Twitter API Rate Limited: {e}")
+        print("You've hit the rate limit. Waiting before next attempt...")
+        time.sleep(900)  # Wait 15 minutes
+        return False
     except Exception as e:
         print(f"❌ Error posting reply: {e}")
+        print(f"Error type: {type(e).__name__}")
         return False
 
 def view_reply_previews():
@@ -1057,32 +1411,66 @@ def collect_and_save_cancer_tweets():
         os.remove(ALL_SEEN_IDS_PATH)
         print("✅ Cleared all_seen_ids.txt")
     
-    # List of cancer-related keywords to search for (focusing on current patients, not survivors)
+    # List of cancer-related keywords to search for (ONLY recent diagnosis)
     cancer_keywords = [
-        "just diagnosed with cancer", "stage 4 cancer", "my cancer journey",
-        "cancer treatment advice", "chemo side effects", "cancer trial", 
-        "breast cancer diagnosis", "pancreatic cancer help", "cancer battle", 
-        "terminal cancer", "fighting cancer", "my mom has cancer", 
-        "my dad has cancer", "my sister has cancer", "my brother has cancer", 
-        "cancer pain", "scan came back", "tumor found", "cancer diagnosis",
-        "metastatic cancer", "oncology appointment", "chemo started",
-        "radiation treatment", "cancer support", "end of life care",
-        "cancer is back", "recurrence of cancer", "cancer sucks",
-        "hope for cancer patients", "clinical trials for cancer",
-        "alternative cancer treatment", "lung cancer diagnosis", 
-        "my friend has cancer", "currently fighting cancer", "going through chemo",
-        "on chemo", "starting chemo", "chemo side effects", "radiation side effects",
-        "treatment side effects", "cancer symptoms", "my cancer", "battling cancer",
-        "cancer treatment", "cancer therapy", "cancer medication", "cancer drugs",
-        "cancer surgery", "cancer operation", "cancer procedure", "cancer scan",
-        "cancer test", "cancer biopsy", "cancer results", "cancer update",
-        "cancer progress", "cancer status", "cancer condition", "cancer health",
-        "cancer recovery", "cancer healing", "cancer remission", "cancer relapse",
-        "cancer recurrence", "cancer spread", "cancer growth", "cancer tumor",
-        "cancer mass", "cancer lump", "cancer lesion", "cancer spot",
-        "cancer cell", "cancer tissue", "cancer organ", "cancer bone",
-        "cancer liver", "cancer lung", "cancer brain", "cancer blood",
-        "cancer lymph", "cancer node", "cancer gland", "cancer marrow"
+        # JUST DIAGNOSED - HIGHEST PRIORITY
+        "just diagnosed with cancer",
+        "just found out i have cancer", 
+        "just got diagnosed",
+        "cancer diagnosis today",
+        "diagnosed with cancer today",
+        "found out i have cancer",
+        "just learned i have cancer",
+        "cancer test results",
+        "cancer biopsy results",
+        "cancer scan results",
+        "cancer blood test",
+        "cancer screening results",
+        "cancer detection",
+        "cancer found",
+        "cancer discovered",
+        "cancer confirmed",
+        "just got the news",
+        "cancer news",
+        "cancer results",
+        "cancer update",
+        
+        # IMMEDIATE REACTION
+        "cancer diagnosis",
+        "diagnosed with cancer",
+        "i have cancer",
+        "my cancer",
+        "cancer positive",
+        "cancer test positive",
+        "cancer confirmed",
+        "cancer detected",
+        "cancer identified",
+        "cancer discovered",
+        "cancer found",
+        "cancer revealed",
+        "cancer diagnosis confirmed",
+        "cancer test confirmed",
+        "cancer biopsy confirmed",
+        
+        # FAMILY RECENT DIAGNOSIS
+        "my mom just diagnosed",
+        "my dad just diagnosed",
+        "my sister just diagnosed",
+        "my brother just diagnosed",
+        "my wife just diagnosed",
+        "my husband just diagnosed",
+        "my child just diagnosed",
+        "my friend just diagnosed",
+        "my family just diagnosed",
+        "mom cancer diagnosis",
+        "dad cancer diagnosis",
+        "sister cancer diagnosis",
+        "brother cancer diagnosis",
+        "wife cancer diagnosis",
+        "husband cancer diagnosis",
+        "child cancer diagnosis",
+        "friend cancer diagnosis",
+        "family cancer diagnosis"
     ]
 
     # Randomly select 8 keywords to search (to avoid rate limits)
@@ -1294,14 +1682,13 @@ def view_reply_urls():
 
 # Main execution block
 if __name__ == "__main__":
-    # Verify Twitter credentials before starting
-    try:
-        user = post_api.verify_credentials()
-        print(f"✅ Logged in as: @{user.screen_name} (User ID: {user.id})")
-    except Exception as e:
-        print("❌ Failed to verify Twitter account:", e)
-        exit()
-
+    # The Twitter client test is already done during initialization above
+    # Display the logged-in user info
+    print(f"✅ Logged in as: @{BOT_USERNAME} (User ID: {BOT_USER_ID})")
+    
+    # Show current diagnostic information
+    show_diagnostic_info()
+    
     logger.info("🩺 Liora AI Cancer Tweet Bot Starting - Continuous Auto-Posting Mode")
     print("\nBot will run continuously and post replies every 6 hours:\n")
 
@@ -1330,20 +1717,20 @@ if __name__ == "__main__":
             view_engagement_metrics()
             print("✅ Step 4 complete!\n")
             
-                    # Step 5: View detailed posted replies
-        print("📋 STEP 5: Viewing detailed posted replies...")
-        view_posted_replies()
-        print("✅ Step 5 complete!\n")
-        
-        # Step 6: View posted reply URLs
-        print("🔗 STEP 6: Viewing posted reply URLs...")
-        view_reply_urls()
-        print("✅ Step 6 complete!\n")
-        
-        # Step 7: Export response data
-        print("📤 STEP 7: Exporting response data...")
-        export_response_data()
-        print("✅ Step 7 complete!\n")
+            # Step 5: View detailed posted replies
+            print("📋 STEP 5: Viewing detailed posted replies...")
+            view_posted_replies()
+            print("✅ Step 5 complete!\n")
+            
+            # Step 6: View posted reply URLs
+            print("🔗 STEP 6: Viewing posted reply URLs...")
+            view_reply_urls()
+            print("✅ Step 6 complete!\n")
+            
+            # Step 7: Export response data
+            print("📤 STEP 7: Exporting response data...")
+            export_response_data()
+            print("✅ Step 7 complete!\n")
             
             print("🎉 Bot cycle completed successfully!")
             print("📁 Check the 'data/' folder for all generated files.")
@@ -1358,7 +1745,6 @@ if __name__ == "__main__":
     run_bot_cycle()
     
     # Schedule to run every 6 hours (more conservative)
-    import schedule
     schedule.every(6).hours.do(run_bot_cycle)
     
     print(f"\n📅 Bot scheduled to run every 6 hours")
