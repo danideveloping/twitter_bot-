@@ -1253,8 +1253,10 @@ def post_reply(tweet_id, reply_text):
             print(f"⚠️ Could not get username, using generic URL: {e}")
             reply_url = f"https://twitter.com/i/status/{reply_tweet_id}"
         
-        # Save to reply_urls.txt
-        save_reply_url(reply_url)
+      # Save the original tweet URL instead of the reply
+        original_tweet_url = f"https://twitter.com/i/status/{tweet_id}"
+        save_reply_url(original_tweet_url)
+
         
         # Save detailed reply information
         # Get original tweet text from the tweet we're replying to
@@ -1416,7 +1418,6 @@ def collect_and_save_cancer_tweets():
         # JUST DIAGNOSED - HIGHEST PRIORITY
         "just diagnosed with cancer",
         "just found out i have cancer", 
-        "just got diagnosed",
         "cancer diagnosis today",
         "diagnosed with cancer today",
         "found out i have cancer",
@@ -1430,7 +1431,7 @@ def collect_and_save_cancer_tweets():
         "cancer found",
         "cancer discovered",
         "cancer confirmed",
-        "just got the news",
+        "just got the news that i had cancer",
         "cancer news",
         "cancer results",
         "cancer update",
@@ -1453,15 +1454,15 @@ def collect_and_save_cancer_tweets():
         "cancer biopsy confirmed",
         
         # FAMILY RECENT DIAGNOSIS
-        "my mom just diagnosed",
-        "my dad just diagnosed",
-        "my sister just diagnosed",
-        "my brother just diagnosed",
-        "my wife just diagnosed",
-        "my husband just diagnosed",
-        "my child just diagnosed",
-        "my friend just diagnosed",
-        "my family just diagnosed",
+        "my mom just diagnosed with cancer",
+        "my dad just diagnosed with cancer",
+        "my sister just diagnosed with cancer",
+        "my brother just diagnosed with cancer",
+        "my wife just diagnosed with cancer",
+        "my husband just diagnosed with cancer",
+        "my child just diagnosed with cancer",
+        "my friend just diagnosed with cancer",
+        "my family just diagnosed with cancer",
         "mom cancer diagnosis",
         "dad cancer diagnosis",
         "sister cancer diagnosis",
