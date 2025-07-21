@@ -2,6 +2,7 @@ services:
   - type: worker
     name: twitter-bot
     runtime: python
+    pythonVersion: "3.12"
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python twitter_bot.py"
     autoDeploy: true
