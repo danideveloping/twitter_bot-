@@ -35,8 +35,11 @@ ALL_SEEN_IDS_PATH = "data/all_seen_ids.txt"   # Tracks which tweets we've alread
 REPLY_PREVIEWS_PATH = "data/reply_previews.txt"  # Stores reply previews before posting
 RESPONSES_TRACKING_PATH = "data/responses_tracking.csv"  # Tracks responses to our replies
 ENGAGEMENT_METRICS_PATH = "data/engagement_metrics.csv"  # Tracks likes, retweets, etc.
-MAX_REPLIES_PER_HOUR = 20                    # Rate limiting to avoid Twitter restrictions
+MAX_REPLIES_PER_HOUR = 5                     # Conservative rate limiting (Twitter-friendly)
+MAX_REPLIES_PER_DAY = 30                     # Daily limit to avoid spam flags
 reply_timestamps = []                         # Tracks when replies were sent for rate limiting
+daily_reply_count = 0                         # Tracks daily reply count
+last_reset_date = None                        # Tracks when to reset daily count
 
 def mentions_celebrity(text):
     """
@@ -608,16 +611,37 @@ def search_tweets_by_keyword(keyword, count=30):
 def can_reply():
     """
     Check if we can send another reply based on rate limiting.
-    Ensures we don't exceed MAX_REPLIES_PER_HOUR.
+    Ensures we don't exceed hourly and daily limits to avoid Twitter spam detection.
     
     Returns:
         bool: True if we can reply, False if rate limited
     """
     now = time.time()
-    global reply_timestamps
+    current_date = datetime.now().date()
+    
+    global reply_timestamps, daily_reply_count, last_reset_date
+    
+    # Reset daily count if it's a new day
+    if last_reset_date != current_date:
+        daily_reply_count = 0
+        last_reset_date = current_date
+    
     # Remove timestamps older than 1 hour
     reply_timestamps = [t for t in reply_timestamps if now - t < 3600]
-    return len(reply_timestamps) < MAX_REPLIES_PER_HOUR
+    
+    # Check hourly limit
+    hourly_limit_ok = len(reply_timestamps) < MAX_REPLIES_PER_HOUR
+    
+    # Check daily limit
+    daily_limit_ok = daily_reply_count < MAX_REPLIES_PER_DAY
+    
+    if not hourly_limit_ok:
+        print(f"⏳ Hourly rate limit reached ({len(reply_timestamps)}/{MAX_REPLIES_PER_HOUR})")
+    
+    if not daily_limit_ok:
+        print(f"⏳ Daily rate limit reached ({daily_reply_count}/{MAX_REPLIES_PER_DAY})")
+    
+    return hourly_limit_ok and daily_limit_ok
 
 def looks_like_real_cancer_tweet(text):
     """
@@ -1035,6 +1059,7 @@ def collect_and_save_cancer_tweets():
 def auto_post_replies_to_tweets(tweets):
     """
     Automatically post replies to filtered tweets.
+    Uses conservative limits to avoid Twitter spam detection.
     
     Args:
         tweets (list): List of tweet objects to reply to
@@ -1043,6 +1068,7 @@ def auto_post_replies_to_tweets(tweets):
     processed_ids = set()  # Track IDs processed in this session
     
     print(f"\n🚀 Auto-posting replies to {len(tweets)} filtered tweets...")
+    print(f"📊 Current limits: {MAX_REPLIES_PER_HOUR}/hour, {MAX_REPLIES_PER_DAY}/day")
     
     for tweet in tweets:
         tweet_id = tweet.id
@@ -1065,8 +1091,7 @@ def auto_post_replies_to_tweets(tweets):
 
         # Check rate limiting
         if not can_reply():
-            print(f"⏳ Rate limit reached. Waiting before posting more replies...")
-            time.sleep(300)  # Wait 5 minutes
+            print(f"⏳ Rate limit reached. Skipping this tweet...")
             continue
 
         print(f"\n📌 Tweet ID: {tweet_id}")
@@ -1083,13 +1108,16 @@ def auto_post_replies_to_tweets(tweets):
             reply_count += 1
             # Add timestamp for rate limiting
             reply_timestamps.append(time.time())
+            # Increment daily count
+            global daily_reply_count
+            daily_reply_count += 1
         else:
             print("❌ Failed to post reply")
         
         print("=" * 60)
         
-        # Random delay between posts to avoid rate limits
-        delay = random.uniform(60, 120)  # 1-2 minutes
+        # Conservative delay between posts to avoid Twitter spam detection
+        delay = random.uniform(300, 600)  # 5-10 minutes between posts
         print(f"⏳ Waiting {delay:.0f} seconds before next post...")
         time.sleep(delay)
         
@@ -1192,47 +1220,71 @@ if __name__ == "__main__":
         print("❌ Failed to verify Twitter account:", e)
         exit()
 
-    logger.info("🩺 Liora AI Cancer Tweet Bot Starting - Auto-Posting Mode")
-    print("\nBot will automatically post replies to Twitter:\n")
+    logger.info("🩺 Liora AI Cancer Tweet Bot Starting - Continuous Auto-Posting Mode")
+    print("\nBot will run continuously and post replies every 6 hours:\n")
 
+    def run_bot_cycle():
+        """Run one complete cycle of the bot"""
+        try:
+            print(f"\n🔄 Starting bot cycle at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # Step 1: Search for cancer tweets and auto-post replies
+            print("🔍 STEP 1: Searching for cancer tweets and auto-posting replies...")
+            collect_and_save_cancer_tweets()
+            print("✅ Step 1 complete!\n")
+            
+            # Step 2: Check for responses to bot tweets
+            print("📨 STEP 2: Checking for responses to bot tweets...")
+            track_all_responses()
+            print("✅ Step 2 complete!\n")
+            
+            # Step 3: View all tracked responses
+            print("📊 STEP 3: Viewing tracked responses...")
+            view_responses()
+            print("✅ Step 3 complete!\n")
+            
+            # Step 4: View engagement metrics
+            print("📈 STEP 4: Viewing engagement metrics...")
+            view_engagement_metrics()
+            print("✅ Step 4 complete!\n")
+            
+            # Step 5: View posted reply URLs
+            print("🔗 STEP 5: Viewing posted reply URLs...")
+            view_reply_urls()
+            print("✅ Step 5 complete!\n")
+            
+            # Step 6: Export response data
+            print("📤 STEP 6: Exporting response data...")
+            export_response_data()
+            print("✅ Step 6 complete!\n")
+            
+            print("🎉 Bot cycle completed successfully!")
+            print("📁 Check the 'data/' folder for all generated files.")
+            print("🐦 Replies have been automatically posted to Twitter!")
+            print(f"⏰ Next cycle in 6 hours...")
+            
+        except Exception as e:
+            logger.error(f"Error in bot cycle: {e}")
+            print(f"❌ Error in bot cycle: {e}")
+
+    # Run initial cycle
+    run_bot_cycle()
+    
+    # Schedule to run every 6 hours (more conservative)
+    import schedule
+    schedule.every(6).hours.do(run_bot_cycle)
+    
+    print(f"\n📅 Bot scheduled to run every 6 hours")
+    print("🔄 Bot is now running continuously...")
+    print("⏹️  Press Ctrl+C to stop")
+    
     try:
-        # Step 1: Search for cancer tweets and auto-post replies
-        print("🔍 STEP 1: Searching for cancer tweets and auto-posting replies...")
-        collect_and_save_cancer_tweets()
-        print("✅ Step 1 complete!\n")
-        
-        # Step 2: Check for responses to bot tweets
-        print("📨 STEP 2: Checking for responses to bot tweets...")
-        track_all_responses()
-        print("✅ Step 2 complete!\n")
-        
-        # Step 3: View all tracked responses
-        print("📊 STEP 3: Viewing tracked responses...")
-        view_responses()
-        print("✅ Step 3 complete!\n")
-        
-        # Step 4: View engagement metrics
-        print("📈 STEP 4: Viewing engagement metrics...")
-        view_engagement_metrics()
-        print("✅ Step 4 complete!\n")
-        
-        # Step 5: View posted reply URLs
-        print("🔗 STEP 5: Viewing posted reply URLs...")
-        view_reply_urls()
-        print("✅ Step 5 complete!\n")
-        
-        # Step 6: Export response data
-        print("📤 STEP 6: Exporting response data...")
-        export_response_data()
-        print("✅ Step 6 complete!\n")
-        
-        print("🎉 All functions completed successfully!")
-        print("📁 Check the 'data/' folder for all generated files.")
-        print("🐦 Replies have been automatically posted to Twitter!")
-        
+        while True:
+            schedule.run_pending()
+            time.sleep(60)  # Check every minute
     except KeyboardInterrupt:
         logger.info("Bot stopped by user.")
         print("\n🛑 Bot stopped.")
     except Exception as e:
-        logger.error(f"Error in main execution: {e}")
+        logger.error(f"Error in main loop: {e}")
         print(f"❌ Error: {e}")
