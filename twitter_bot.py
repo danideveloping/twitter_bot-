@@ -33,6 +33,8 @@ post_api = tweepy.API(auth)
 CANCER_TWEETS_PATH = "data/cancer_posts.csv"  # Stores found cancer-related tweets
 ALL_SEEN_IDS_PATH = "data/all_seen_ids.txt"   # Tracks which tweets we've already seen
 REPLY_PREVIEWS_PATH = "data/reply_previews.txt"  # Stores reply previews before posting
+RESPONSES_TRACKING_PATH = "data/responses_tracking.csv"  # Tracks responses to our replies
+ENGAGEMENT_METRICS_PATH = "data/engagement_metrics.csv"  # Tracks likes, retweets, etc.
 MAX_REPLIES_PER_HOUR = 20                    # Rate limiting to avoid Twitter restrictions
 reply_timestamps = []                         # Tracks when replies were sent for rate limiting
 
@@ -98,19 +100,327 @@ def save_id_to_file(path, tweet_id):
     with open(path, "a", encoding="utf-8") as f:
         f.write(str(tweet_id) + "\n")
 
+def get_bot_user_id():
+    """
+    Get the bot's user ID for tracking responses.
+    
+    Returns:
+        str: Bot's user ID, or None if failed
+    """
+    try:
+        user = post_api.verify_credentials()
+        return str(user.id)
+    except Exception as e:
+        logger.error(f"Failed to get bot user ID: {e}")
+        return None
+
+def check_for_responses():
+    """
+    Check for responses (replies, mentions) to the bot's tweets.
+    
+    Returns:
+        list: List of response tweets
+    """
+    try:
+        bot_user_id = get_bot_user_id()
+        if not bot_user_id:
+            logger.error("Could not get bot user ID for response tracking")
+            return []
+        
+        # Get mentions of the bot
+        mentions = client.get_users_mentions(
+            id=bot_user_id,
+            tweet_fields=["id", "text", "created_at", "author_id", "in_reply_to_user_id"],
+            max_results=50
+        )
+        
+        responses = []
+        if mentions.data:
+            for mention in mentions.data:
+                # Only include actual replies (not just mentions)
+                if mention.in_reply_to_user_id == bot_user_id:
+                    responses.append(mention)
+        
+        logger.info(f"Found {len(responses)} responses to bot tweets")
+        return responses
+        
+    except Exception as e:
+        logger.error(f"Error checking for responses: {e}")
+        return []
+
+def get_tweet_engagement(tweet_id):
+    """
+    Get engagement metrics for a specific tweet.
+    
+    Args:
+        tweet_id (str): The tweet ID to check
+        
+    Returns:
+        dict: Engagement metrics (likes, retweets, replies)
+    """
+    try:
+        tweet = client.get_tweet(
+            id=tweet_id,
+            tweet_fields=["public_metrics"]
+        )
+        
+        if tweet.data and hasattr(tweet.data, 'public_metrics'):
+            metrics = tweet.data.public_metrics
+            return {
+                'likes': metrics.get('like_count', 0),
+                'retweets': metrics.get('retweet_count', 0),
+                'replies': metrics.get('reply_count', 0),
+                'quotes': metrics.get('quote_count', 0)
+            }
+        return {'likes': 0, 'retweets': 0, 'replies': 0, 'quotes': 0}
+        
+    except Exception as e:
+        logger.error(f"Error getting engagement for tweet {tweet_id}: {e}")
+        return {'likes': 0, 'retweets': 0, 'replies': 0, 'quotes': 0}
+
+def save_response_data(response_tweet, original_tweet_id):
+    """
+    Save response data to CSV for tracking.
+    
+    Args:
+        response_tweet: Tweet object representing the response
+        original_tweet_id (str): ID of the original tweet we replied to
+    """
+    ensure_file_exists(RESPONSES_TRACKING_PATH, [
+        "response_tweet_id", "response_text", "response_author_id", 
+        "response_created_at", "original_tweet_id", "response_type"
+    ])
+    
+    with open(RESPONSES_TRACKING_PATH, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        row = [
+            response_tweet.id,
+            response_tweet.text.replace("\n", " ").strip(),
+            response_tweet.author_id,
+            response_tweet.created_at,
+            original_tweet_id,
+            "reply"  # Could be "reply", "mention", "quote" etc.
+        ]
+        writer.writerow(row)
+    
+    logger.info(f"Saved response data for tweet {response_tweet.id}")
+
+def save_engagement_metrics(tweet_id, metrics, timestamp=None):
+    """
+    Save engagement metrics for a tweet.
+    
+    Args:
+        tweet_id (str): The tweet ID
+        metrics (dict): Engagement metrics
+        timestamp (str): Optional timestamp, defaults to current time
+    """
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    ensure_file_exists(ENGAGEMENT_METRICS_PATH, [
+        "tweet_id", "timestamp", "likes", "retweets", "replies", "quotes"
+    ])
+    
+    with open(ENGAGEMENT_METRICS_PATH, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        row = [
+            tweet_id,
+            timestamp,
+            metrics.get('likes', 0),
+            metrics.get('retweets', 0),
+            metrics.get('replies', 0),
+            metrics.get('quotes', 0)
+        ]
+        writer.writerow(row)
+    
+    logger.info(f"Saved engagement metrics for tweet {tweet_id}")
+
+def track_all_responses():
+    """
+    Main function to check for and track all responses to bot tweets.
+    """
+    print("🔍 Checking for responses to bot tweets...")
+    
+    # Get responses
+    responses = check_for_responses()
+    
+    if not responses:
+        print("📭 No new responses found.")
+        return
+    
+    print(f"📨 Found {len(responses)} response(s)!")
+    
+    # Track each response
+    for response in responses:
+        print(f"\n📌 Response from @{response.author_id}:")
+        print(f"💬 {response.text[:100]}...")
+        
+        # Save response data
+        save_response_data(response, response.in_reply_to_user_id)
+        
+        # Get and save engagement metrics for the original tweet
+        original_tweet_id = response.in_reply_to_user_id
+        metrics = get_tweet_engagement(original_tweet_id)
+        save_engagement_metrics(original_tweet_id, metrics)
+        
+        print(f"✅ Tracked response and engagement metrics")
+    
+    print(f"\n🎉 Successfully tracked {len(responses)} response(s)!")
+
+def view_responses():
+    """
+    Display all tracked responses to bot tweets.
+    """
+    print("=== Bot Response Tracking ===")
+    print()
+    
+    if not os.path.exists(RESPONSES_TRACKING_PATH):
+        print("📁 No response data found yet!")
+        print("   No responses have been tracked yet.")
+        print("   Run 'track' to check for responses.")
+        return
+    
+    try:
+        with open(RESPONSES_TRACKING_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            responses = list(reader)
+        
+        if not responses:
+            print("📁 File exists but no responses found!")
+            return
+        
+        print(f"📊 Found {len(responses)} tracked response(s):")
+        print("-" * 80)
+        
+        for i, response in enumerate(responses, 1):
+            print(f"\n{i}. Response ID: {response['response_tweet_id']}")
+            print(f"   Author: @{response['response_author_id']}")
+            print(f"   Time: {response['response_created_at']}")
+            print(f"   Original Tweet: {response['original_tweet_id']}")
+            print(f"   Response: {response['response_text'][:100]}...")
+            print("-" * 80)
+        
+        print(f"\n📈 Total responses tracked: {len(responses)}")
+        
+    except Exception as e:
+        print(f"❌ Error reading response data: {e}")
+
+def view_engagement_metrics():
+    """
+    Display engagement metrics for bot tweets.
+    """
+    print("=== Bot Engagement Metrics ===")
+    print()
+    
+    if not os.path.exists(ENGAGEMENT_METRICS_PATH):
+        print("📁 No engagement data found yet!")
+        print("   No engagement metrics have been tracked yet.")
+        print("   Run 'track' to check for responses and engagement.")
+        return
+    
+    try:
+        with open(ENGAGEMENT_METRICS_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            metrics = list(reader)
+        
+        if not metrics:
+            print("📁 File exists but no metrics found!")
+            return
+        
+        print(f"📊 Found {len(metrics)} engagement record(s):")
+        print("-" * 80)
+        
+        # Group by tweet ID to show latest metrics for each tweet
+        tweet_metrics = {}
+        for record in metrics:
+            tweet_id = record['tweet_id']
+            if tweet_id not in tweet_metrics or record['timestamp'] > tweet_metrics[tweet_id]['timestamp']:
+                tweet_metrics[tweet_id] = record
+        
+        for i, (tweet_id, record) in enumerate(tweet_metrics.items(), 1):
+            print(f"\n{i}. Tweet ID: {tweet_id}")
+            print(f"   Last Updated: {record['timestamp']}")
+            print(f"   ❤️  Likes: {record['likes']}")
+            print(f"   🔄 Retweets: {record['retweets']}")
+            print(f"   💬 Replies: {record['replies']}")
+            print(f"   📝 Quotes: {record['quotes']}")
+            print("-" * 80)
+        
+        # Calculate totals
+        total_likes = sum(int(m['likes']) for m in tweet_metrics.values())
+        total_retweets = sum(int(m['retweets']) for m in tweet_metrics.values())
+        total_replies = sum(int(m['replies']) for m in tweet_metrics.values())
+        total_quotes = sum(int(m['quotes']) for m in tweet_metrics.values())
+        
+        print(f"\n📈 Total Engagement:")
+        print(f"   ❤️  Total Likes: {total_likes}")
+        print(f"   🔄 Total Retweets: {total_retweets}")
+        print(f"   💬 Total Replies: {total_replies}")
+        print(f"   📝 Total Quotes: {total_quotes}")
+        print(f"   🎯 Total Interactions: {total_likes + total_retweets + total_replies + total_quotes}")
+        
+    except Exception as e:
+        print(f"❌ Error reading engagement data: {e}")
+
+def export_response_data():
+    """
+    Export response data to a readable format.
+    """
+    print("=== Exporting Response Data ===")
+    print()
+    
+    if not os.path.exists(RESPONSES_TRACKING_PATH):
+        print("📁 No response data to export!")
+        return
+    
+    try:
+        with open(RESPONSES_TRACKING_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            responses = list(reader)
+        
+        if not responses:
+            print("📁 No responses to export!")
+            return
+        
+        # Create export file
+        export_path = "data/responses_export.txt"
+        with open(export_path, "w", encoding="utf-8") as f:
+            f.write("=== BOT RESPONSES EXPORT ===\n")
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total Responses: {len(responses)}\n\n")
+            
+            for i, response in enumerate(responses, 1):
+                f.write(f"RESPONSE #{i}\n")
+                f.write(f"Response ID: {response['response_tweet_id']}\n")
+                f.write(f"Author: @{response['response_author_id']}\n")
+                f.write(f"Time: {response['response_created_at']}\n")
+                f.write(f"Original Tweet: {response['original_tweet_id']}\n")
+                f.write(f"Response Text: {response['response_text']}\n")
+                f.write("-" * 60 + "\n\n")
+        
+        print(f"✅ Exported {len(responses)} responses to {export_path}")
+        
+    except Exception as e:
+        print(f"❌ Error exporting data: {e}")
+
 def fallback_cancer_replies():
     """
     Provide fallback replies when OpenAI API is unavailable.
     These are pre-written responses about the AI cancer tool.
+    Note: Call-to-action will be added automatically by the system.
     
     Returns:
         list: List of fallback reply messages
     """
     return [
-        "Just diagnosed? Don't settle for one opinion. Our AI scans your data and all treatments worldwide. DM if you want the link.",
-        "Cancer's terrifying. We built an AI to help with treatment decisions. Can't launch it in the West, so we built it in Albania. DM if you want to see it.",
-        "Sending love. Most people don't get the best options. AI can help, but the system blocks it. We're bypassing that. Let me know if you're curious.",
-        "This is why we built our AI. It finds better paths when things feel hopeless. Can't promise a cure, but it can guide. DM if you want it."
+        "Just diagnosed? Don't settle for one opinion. Our AI scans your data and all treatments worldwide.",
+        "Cancer's terrifying. We built an AI to help with treatment decisions. Can't launch it in the West, so we built it in Albania.",
+        "Sending love. Most people don't get the best options. AI can help, but the system blocks it. We're bypassing that.",
+        "This is why we built our AI. It finds better paths when things feel hopeless. Can't promise a cure, but it can guide.",
+        "My friend's cancer journey inspired this AI tool. It scans global studies for better treatment paths.",
+        "Built outside the U.S. because we couldn't wait. Brings clarity when doctors disagree.",
+        "Compares cases worldwide for better options. Finds patterns doctors might miss.",
+        "Bypasses the slow system that almost cost time. Helped people we care about find better paths."
     ]
 
 def remove_emojis(text):
@@ -176,10 +486,10 @@ def generate_reply(tweet_text):
     """
     try:
         if not openai_api_key:
-            return random.choice(fallback_cancer_replies())
-
-        # System message that defines the AI's personality and behavior
-        system_message = """You are a real person on Twitter, not a bot or a brand. You're responding to people tweeting about cancer—often overwhelmed, scared, or grieving.
+            base_reply = random.choice(fallback_cancer_replies())
+        else:
+            # System message that defines the AI's personality and behavior
+            system_message = """You are a real person on Twitter, not a bot or a brand. You're responding to people tweeting about cancer—often overwhelmed, scared, or grieving.
 
     You're building an AI tool because your close friend has cancer. Watching them bounce between doctors and struggle for clarity showed you how broken and slow the system is. That pushed you to build something better—outside the U.S., in Albania—because in the West it's nearly impossible to move fast when time matters most.
 
@@ -188,15 +498,14 @@ def generate_reply(tweet_text):
     You are not promoting a product. You're offering something real—because someone you love is still fighting.
 
     Every reply must:
-    - Be under 60 words
-    - Be under 120 characters
+    - Be under 50 words (to leave room for call-to-action)
+    - Be under 100 characters (to leave room for call-to-action)
     - Sound like a real, emotionally honest human
     - Never use marketing language, therapy clichés, hashtags, links, or emojis
     - Never mention celebrity names
     - Never say "sorry for your loss" or offer condolences when a public figure is referenced
     - Be completely unique and different from other replies
-    - Avoid repetitive phrases like "feel free to message", "DM if you want", "let me know if"
-    - Use "DM me if you want the link" or "feel free to reach out" instead of "email me"
+    - DO NOT include any call-to-action phrases - the system will add them automatically
 
     Context is everything:
     - If the tweet is about a **public figure** (like a president, actor, or celebrity), do **not** express sympathy. Do **not** misread it as a personal loss.
@@ -212,8 +521,8 @@ def generate_reply(tweet_text):
 
     Only reply to tweets that are personally relevant or clearly written by someone affected by cancer—skip news, politics, or vague posts."""
 
-        # User message with specific instructions for this tweet
-        user_message = f"""Tweet: \"{tweet_text}\"
+            # User message with specific instructions for this tweet
+            user_message = f"""Tweet: \"{tweet_text}\"
 
     You're replying to someone tweeting about cancer. Read the context first.
 
@@ -221,9 +530,9 @@ def generate_reply(tweet_text):
 
     If the tweet is **personal** (they mention their mom, sibling, or themselves), then you can reply with emotional honesty—briefly mention your friend's cancer and how that led to building the tool.
 
-    CRITICAL: Keep reply under 120 characters. Be extremely concise and direct.
+    CRITICAL: Keep reply under 100 characters. Be extremely concise and direct. DO NOT include any call-to-action - the system will add it automatically.
 
-    IMPORTANT: Make this reply completely unique and different. Avoid repetitive phrases. Be creative and varied in your approach.
+    IMPORTANT: Make this reply completely unique and different. Be creative and varied in your approach.
 
     Examples of short, varied approaches:
     - "My friend's cancer journey inspired this AI tool."
@@ -237,13 +546,37 @@ def generate_reply(tweet_text):
 
     Be creative and make each reply feel personal and unique."""
 
-        reply = generate_ai_reply(user_message, system_message, openai_api_key)
-        if reply:
-            return remove_emojis(reply.strip('"\''))[:280]  # Twitter character limit for posting-ready previews
-        return random.choice(fallback_cancer_replies())
+            base_reply = generate_ai_reply(user_message, system_message, openai_api_key)
+            if not base_reply:
+                base_reply = random.choice(fallback_cancer_replies())
+
+        # Add call-to-action at the end
+        call_to_actions = [
+            "DM me if you want the link.",
+            "Feel free to reach out if interested.",
+            "DM me for the link.",
+            "Let me know if you want the link.",
+            "DM me if you're curious.",
+            "Feel free to message me for the link.",
+            "DM me if you want to see it.",
+            "Let me know if you want more info."
+        ]
+        
+        # Choose a random call-to-action
+        cta = random.choice(call_to_actions)
+        
+        # Combine base reply with call-to-action
+        full_reply = f"{base_reply.strip()} {cta}"
+        
+        # Ensure it fits within Twitter's character limit
+        return remove_emojis(full_reply.strip())[:280]
+        
     except Exception as e:
         logger.error(f"Reply generation failed: {e}")
-        return random.choice(fallback_cancer_replies())
+        # Fallback with call-to-action
+        fallback = random.choice(fallback_cancer_replies())
+        cta = random.choice(["DM me if you want the link.", "Feel free to reach out if interested."])
+        return f"{fallback} {cta}"
 
 def search_tweets_by_keyword(keyword, count=30):
     """
@@ -510,10 +843,6 @@ def post_reply(tweet_id, reply_text):
         bool: True if successful, False otherwise
     """
     try:
-        # Wait 2 minutes before posting (Twitter rate limiting)
-        print(f"⏳ Waiting 2 minutes before posting...")
-        time.sleep(120)
-        
         # Post the reply
         tweet = post_api.update_status(
             status=reply_text,
@@ -532,8 +861,14 @@ def post_reply(tweet_id, reply_text):
         # Update preview status
         mark_reply_as_posted(tweet_id, reply_url)
         
+        # Track engagement metrics for the posted reply
+        print(f"📊 Tracking engagement metrics...")
+        metrics = get_tweet_engagement(str(tweet.id))
+        save_engagement_metrics(str(tweet.id), metrics)
+        
         print(f"✅ Successfully posted reply!")
         print(f"🔗 Reply URL: {reply_url}")
+        print(f"📈 Initial engagement: ❤️ {metrics.get('likes', 0)} 🔄 {metrics.get('retweets', 0)} 💬 {metrics.get('replies', 0)}")
         return True
         
     except Exception as e:
@@ -694,8 +1029,76 @@ def collect_and_save_cancer_tweets():
         all_filtered_tweets.extend(filtered_tweets)
         time.sleep(random.uniform(10, 20))  # Random delay between searches
     
-    # Generate previews directly from search results
-    generate_previews_from_tweets(all_filtered_tweets)
+    # Automatically post replies to filtered tweets
+    auto_post_replies_to_tweets(all_filtered_tweets)
+
+def auto_post_replies_to_tweets(tweets):
+    """
+    Automatically post replies to filtered tweets.
+    
+    Args:
+        tweets (list): List of tweet objects to reply to
+    """
+    reply_count = 0
+    processed_ids = set()  # Track IDs processed in this session
+    
+    print(f"\n🚀 Auto-posting replies to {len(tweets)} filtered tweets...")
+    
+    for tweet in tweets:
+        tweet_id = tweet.id
+        
+        # Skip if already processed in this session
+        if tweet_id in processed_ids:
+            continue
+            
+        tweet_text = tweet.text
+
+        # Skip tweets mentioning celebrities
+        if mentions_celebrity(tweet_text):
+            print(f"🚫 Skipped tweet (mentions celebrity): {tweet_text[:50]}...")
+            continue
+
+        # Skip tweets that don't look like real cancer posts
+        if not looks_like_real_cancer_tweet(tweet_text):
+            print(f"❌ Skipped tweet (not a real cancer post): {tweet_text[:50]}...")
+            continue
+
+        # Check rate limiting
+        if not can_reply():
+            print(f"⏳ Rate limit reached. Waiting before posting more replies...")
+            time.sleep(300)  # Wait 5 minutes
+            continue
+
+        print(f"\n📌 Tweet ID: {tweet_id}")
+        print(f"💬 Tweet: {tweet_text}")
+        reply = generate_reply(tweet_text)
+        print(f"\n🧠 Generated Reply:\n{reply}")
+        
+        # Post the reply automatically
+        print("📤 Posting reply to Twitter...")
+        success = post_reply(tweet_id, reply)
+        
+        if success:
+            print("✅ Reply posted successfully!")
+            reply_count += 1
+            # Add timestamp for rate limiting
+            reply_timestamps.append(time.time())
+        else:
+            print("❌ Failed to post reply")
+        
+        print("=" * 60)
+        
+        # Random delay between posts to avoid rate limits
+        delay = random.uniform(60, 120)  # 1-2 minutes
+        print(f"⏳ Waiting {delay:.0f} seconds before next post...")
+        time.sleep(delay)
+        
+        processed_ids.add(tweet_id)  # Mark as processed
+    
+    if reply_count == 0:
+        print("❌ No suitable tweets found to reply to.")
+    else:
+        print(f"\n🎉 Successfully posted {reply_count} reply(ies)!")
 
 def generate_previews_from_tweets(tweets):
     """
@@ -743,22 +1146,7 @@ def generate_previews_from_tweets(tweets):
     else:
         print(f"\n🎉 Generated {preview_count} preview(s)!")
 
-def show_menu():
-    """
-    Display the main menu with available options.
-    """
-    print("=== Twitter Bot - Preview Mode ===")
-    print()
-    print("Available commands:")
-    print("1. 'search' - Search for cancer tweets and generate previews")
-    print("2. 'view' - View all reply previews")
-    print("3. 'approve' - Approve and post pending replies")
-    print("4. 'urls' - View all posted reply URLs")
-    print("5. 'menu' - Show this menu")
-    print("6. 'exit' - Exit the program")
-    print()
-    print("Note: This bot only generates previews. No automatic posting to Twitter.")
-    print()
+
 
 def view_reply_urls():
     """
@@ -804,13 +1192,47 @@ if __name__ == "__main__":
         print("❌ Failed to verify Twitter account:", e)
         exit()
 
-    logger.info("🩺 Liora AI Cancer Tweet Bot Starting - Preview Mode")
-    print("\nBot will search for cancer tweets and generate previews (NO POSTING).\n")
+    logger.info("🩺 Liora AI Cancer Tweet Bot Starting - Auto-Posting Mode")
+    print("\nBot will automatically post replies to Twitter:\n")
 
     try:
+        # Step 1: Search for cancer tweets and auto-post replies
+        print("🔍 STEP 1: Searching for cancer tweets and auto-posting replies...")
         collect_and_save_cancer_tweets()
-        # process_and_reply_to_cancer_tweets() # This function is no longer needed
-        print("✅ Search and preview generation complete!")
+        print("✅ Step 1 complete!\n")
+        
+        # Step 2: Check for responses to bot tweets
+        print("📨 STEP 2: Checking for responses to bot tweets...")
+        track_all_responses()
+        print("✅ Step 2 complete!\n")
+        
+        # Step 3: View all tracked responses
+        print("📊 STEP 3: Viewing tracked responses...")
+        view_responses()
+        print("✅ Step 3 complete!\n")
+        
+        # Step 4: View engagement metrics
+        print("📈 STEP 4: Viewing engagement metrics...")
+        view_engagement_metrics()
+        print("✅ Step 4 complete!\n")
+        
+        # Step 5: View posted reply URLs
+        print("🔗 STEP 5: Viewing posted reply URLs...")
+        view_reply_urls()
+        print("✅ Step 5 complete!\n")
+        
+        # Step 6: Export response data
+        print("📤 STEP 6: Exporting response data...")
+        export_response_data()
+        print("✅ Step 6 complete!\n")
+        
+        print("🎉 All functions completed successfully!")
+        print("📁 Check the 'data/' folder for all generated files.")
+        print("🐦 Replies have been automatically posted to Twitter!")
+        
     except KeyboardInterrupt:
         logger.info("Bot stopped by user.")
-        print("🛑 Bot stopped.")
+        print("\n🛑 Bot stopped.")
+    except Exception as e:
+        logger.error(f"Error in main execution: {e}")
+        print(f"❌ Error: {e}")
