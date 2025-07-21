@@ -35,6 +35,8 @@ ALL_SEEN_IDS_PATH = "data/all_seen_ids.txt"   # Tracks which tweets we've alread
 REPLY_PREVIEWS_PATH = "data/reply_previews.txt"  # Stores reply previews before posting
 RESPONSES_TRACKING_PATH = "data/responses_tracking.csv"  # Tracks responses to our replies
 ENGAGEMENT_METRICS_PATH = "data/engagement_metrics.csv"  # Tracks likes, retweets, etc.
+POSTED_REPLIES_PATH = "data/posted_replies.csv"  # Detailed tracking of all posted replies
+REPLY_URLS_PATH = "data/reply_urls.txt"  # Simple list of reply URLs
 MAX_REPLIES_PER_HOUR = 5                     # Conservative rate limiting (Twitter-friendly)
 MAX_REPLIES_PER_DAY = 30                     # Daily limit to avoid spam flags
 reply_timestamps = []                         # Tracks when replies were sent for rate limiting
@@ -760,6 +762,40 @@ def save_tweets_to_csv(tweets, file_path):
     logger.info(f"Saved {len(new_tweets)} new tweets to {file_path}")
     print(f"🔧 DEBUG: Successfully saved {len(new_tweets)} tweets")
 
+def save_posted_reply_details(original_tweet_id, original_tweet_text, reply_text, reply_url, reply_tweet_id, timestamp=None):
+    """
+    Save detailed information about a posted reply to CSV.
+    
+    Args:
+        original_tweet_id (str): ID of the original tweet we replied to
+        original_tweet_text (str): Text of the original tweet
+        reply_text (str): The reply text we posted
+        reply_url (str): URL of our posted reply
+        reply_tweet_id (str): ID of our posted reply tweet
+        timestamp (str): Optional timestamp, defaults to current time
+    """
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    ensure_file_exists(POSTED_REPLIES_PATH, [
+        "timestamp", "original_tweet_id", "original_tweet_text", 
+        "reply_text", "reply_url", "reply_tweet_id"
+    ])
+    
+    with open(POSTED_REPLIES_PATH, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        row = [
+            timestamp,
+            original_tweet_id,
+            original_tweet_text.replace("\n", " ").strip(),
+            reply_text.replace("\n", " ").strip(),
+            reply_url,
+            reply_tweet_id
+        ]
+        writer.writerow(row)
+    
+    logger.info(f"Saved detailed reply info for tweet {reply_tweet_id}")
+
 def save_reply_url(url):
     """
     Save a reply URL to a file for tracking purposes.
@@ -768,7 +804,7 @@ def save_reply_url(url):
         url (str): The URL of the posted reply
     """
     os.makedirs("data", exist_ok=True)  # Make sure 'data/' folder exists
-    with open("data/reply_urls.txt", "a", encoding="utf-8") as f:
+    with open(REPLY_URLS_PATH, "a", encoding="utf-8") as f:
         f.write(url + "\n")
 
 def save_reply_preview(original_tweet_id, original_tweet_text, reply_text, timestamp=None):
@@ -878,9 +914,20 @@ def post_reply(tweet_id, reply_text):
         reply_url = f"https://twitter.com/{tweet.user.screen_name}/status/{tweet.id}"
         
         # Save to reply_urls.txt
-        os.makedirs("data", exist_ok=True)
-        with open("data/reply_urls.txt", "a", encoding="utf-8") as f:
-            f.write(reply_url + "\n")
+        save_reply_url(reply_url)
+        
+        # Save detailed reply information
+        # Get original tweet text from the tweet we're replying to
+        original_tweet = client.get_tweet(id=tweet_id)
+        original_tweet_text = original_tweet.data.text if original_tweet.data else "Original tweet not found"
+        
+        save_posted_reply_details(
+            original_tweet_id=tweet_id,
+            original_tweet_text=original_tweet_text,
+            reply_text=reply_text,
+            reply_url=reply_url,
+            reply_tweet_id=str(tweet.id)
+        )
         
         # Update preview status
         mark_reply_as_posted(tweet_id, reply_url)
@@ -1176,22 +1223,57 @@ def generate_previews_from_tweets(tweets):
 
 
 
+def view_posted_replies():
+    """
+    Display detailed information about all posted replies.
+    """
+    print("=== Detailed Posted Replies ===")
+    print()
+    
+    if not os.path.exists(POSTED_REPLIES_PATH):
+        print("📁 No detailed reply data found yet!")
+        print("   No replies have been posted yet.")
+        return
+    
+    try:
+        with open(POSTED_REPLIES_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            replies = list(reader)
+        
+        if not replies:
+            print("📁 File exists but no replies found!")
+            return
+        
+        print(f"📊 Found {len(replies)} posted reply(ies):")
+        print("-" * 80)
+        
+        for i, reply in enumerate(replies, 1):
+            print(f"\n{i}. Posted: {reply['timestamp']}")
+            print(f"   Reply ID: {reply['reply_tweet_id']}")
+            print(f"   Original Tweet: {reply['original_tweet_text'][:100]}...")
+            print(f"   Our Reply: {reply['reply_text']}")
+            print(f"   URL: {reply['reply_url']}")
+            print("-" * 80)
+        
+        print(f"\n📈 Total replies posted: {len(replies)}")
+        
+    except Exception as e:
+        print(f"❌ Error reading file: {e}")
+
 def view_reply_urls():
     """
     Display all posted reply URLs.
     """
-    urls_file = "data/reply_urls.txt"
-    
     print("=== Posted Reply URLs ===")
     print()
     
-    if not os.path.exists(urls_file):
+    if not os.path.exists(REPLY_URLS_PATH):
         print("📁 No URLs found yet!")
         print("   No replies have been posted yet.")
         return
     
     try:
-        with open(urls_file, "r", encoding="utf-8") as f:
+        with open(REPLY_URLS_PATH, "r", encoding="utf-8") as f:
             urls = [line.strip() for line in f.readlines() if line.strip()]
         
         if not urls:
@@ -1248,15 +1330,20 @@ if __name__ == "__main__":
             view_engagement_metrics()
             print("✅ Step 4 complete!\n")
             
-            # Step 5: View posted reply URLs
-            print("🔗 STEP 5: Viewing posted reply URLs...")
-            view_reply_urls()
-            print("✅ Step 5 complete!\n")
-            
-            # Step 6: Export response data
-            print("📤 STEP 6: Exporting response data...")
-            export_response_data()
-            print("✅ Step 6 complete!\n")
+                    # Step 5: View detailed posted replies
+        print("📋 STEP 5: Viewing detailed posted replies...")
+        view_posted_replies()
+        print("✅ Step 5 complete!\n")
+        
+        # Step 6: View posted reply URLs
+        print("🔗 STEP 6: Viewing posted reply URLs...")
+        view_reply_urls()
+        print("✅ Step 6 complete!\n")
+        
+        # Step 7: Export response data
+        print("📤 STEP 7: Exporting response data...")
+        export_response_data()
+        print("✅ Step 7 complete!\n")
             
             print("🎉 Bot cycle completed successfully!")
             print("📁 Check the 'data/' folder for all generated files.")
