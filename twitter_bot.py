@@ -150,8 +150,14 @@ RESPONSES_TRACKING_PATH = "data/responses_tracking.csv"  # Tracks responses to o
 ENGAGEMENT_METRICS_PATH = "data/engagement_metrics.csv"  # Tracks likes, retweets, etc.
 POSTED_REPLIES_PATH = "data/posted_replies.csv"  # Detailed tracking of all posted replies
 REPLY_URLS_PATH = "data/reply_urls.txt"  # Simple list of reply URLs
-MAX_REPLIES_PER_HOUR = 5                     # Conservative rate limiting (Twitter-friendly)
-MAX_REPLIES_PER_DAY = 30                     # Daily limit to avoid spam flags
+
+# OPTIMIZED RATE LIMITING - Twitter-friendly but more active
+MAX_REPLIES_PER_HOUR = 15                    # Increased from 5 to 15 (still well under Twitter's 100/hour limit)
+MAX_REPLIES_PER_DAY = 80                     # Increased from 30 to 80 (conservative daily limit)
+MIN_DELAY_BETWEEN_POSTS = 120                # Minimum 2 minutes between posts (reduced from 5 minutes)
+MAX_DELAY_BETWEEN_POSTS = 300                # Maximum 5 minutes between posts (reduced from 10 minutes)
+BOT_CYCLE_HOURS = 4                          # Run every 4 hours instead of 6 (more frequent cycles)
+
 reply_timestamps = []                         # Tracks when replies were sent for rate limiting
 daily_reply_count = 0                         # Tracks daily reply count
 last_reset_date = None                        # Tracks when to reset daily count
@@ -862,6 +868,20 @@ def can_reply():
     # Check daily limit
     daily_limit_ok = daily_reply_count < MAX_REPLIES_PER_DAY
     
+    # ADDITIONAL SAFETY: Check for rapid posting (Twitter flags accounts that post too quickly)
+    if len(reply_timestamps) >= 2:
+        last_two_posts = sorted(reply_timestamps)[-2:]
+        time_between_last_posts = last_two_posts[1] - last_two_posts[0]
+        if time_between_last_posts < 60:  # Less than 1 minute between posts
+            print(f"⏳ Safety check: Last posts too close together ({time_between_last_posts:.0f}s)")
+            return False
+    
+    # ADDITIONAL SAFETY: Check for burst posting (no more than 5 posts in 10 minutes)
+    recent_posts = [t for t in reply_timestamps if now - t < 600]  # Last 10 minutes
+    if len(recent_posts) >= 5:
+        print(f"⏳ Safety check: Too many posts in last 10 minutes ({len(recent_posts)})")
+        return False
+    
     if not hourly_limit_ok:
         print(f"⏳ Hourly rate limit reached ({len(reply_timestamps)}/{MAX_REPLIES_PER_HOUR})")
     
@@ -1555,7 +1575,7 @@ def auto_post_replies_to_tweets(tweets):
         print("=" * 60)
         
         # Conservative delay between posts to avoid Twitter spam detection
-        delay = random.uniform(300, 600)  # 5-10 minutes between posts
+        delay = random.uniform(MIN_DELAY_BETWEEN_POSTS, MAX_DELAY_BETWEEN_POSTS)  # 2-5 minutes between posts
         print(f"⏳ Waiting {delay:.0f} seconds before next post...")
         time.sleep(delay)
         
@@ -1683,6 +1703,69 @@ def view_reply_urls():
     except Exception as e:
         print(f"❌ Error reading file: {e}")
 
+def analyze_posting_patterns():
+    """
+    Analyze posting patterns to ensure Twitter compliance.
+    """
+    print("=== Posting Pattern Analysis ===")
+    print()
+    
+    if not os.path.exists(POSTED_REPLIES_PATH):
+        print("📁 No posting data found yet!")
+        return
+    
+    try:
+        with open(POSTED_REPLIES_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            replies = list(reader)
+        
+        if not replies:
+            print("📁 No replies to analyze!")
+            return
+        
+        # Group by date
+        from collections import defaultdict
+        daily_posts = defaultdict(list)
+        
+        for reply in replies:
+            date = reply['timestamp'].split()[0]  # Get just the date part
+            daily_posts[date].append(reply)
+        
+        print(f"📊 Analysis of {len(replies)} total replies:")
+        print("-" * 60)
+        
+        # Show daily breakdown
+        for date in sorted(daily_posts.keys()):
+            count = len(daily_posts[date])
+            status = "✅" if count <= MAX_REPLIES_PER_DAY else "⚠️"
+            print(f"{status} {date}: {count} replies")
+        
+        # Calculate averages
+        total_days = len(daily_posts)
+        avg_daily = len(replies) / total_days if total_days > 0 else 0
+        
+        print("-" * 60)
+        print(f"📈 Average: {avg_daily:.1f} replies per day")
+        print(f"🎯 Current daily limit: {MAX_REPLIES_PER_DAY}")
+        print(f"⚡ Current hourly limit: {MAX_REPLIES_PER_HOUR}")
+        
+        # Safety recommendations
+        print("\n🛡️  Safety Status:")
+        if avg_daily <= MAX_REPLIES_PER_DAY * 0.8:
+            print("✅ Posting rate is well within safe limits")
+        elif avg_daily <= MAX_REPLIES_PER_DAY:
+            print("⚠️  Posting rate is at the limit - monitor closely")
+        else:
+            print("❌ Posting rate exceeds limits - consider reducing")
+        
+        print(f"\n💡 Recommendations:")
+        print(f"   - Keep daily average under {MAX_REPLIES_PER_DAY * 0.8:.0f} for safety")
+        print(f"   - Monitor engagement metrics for quality")
+        print(f"   - Watch for Twitter warnings or restrictions")
+        
+    except Exception as e:
+        print(f"❌ Error analyzing patterns: {e}")
+
 # Main execution block
 if __name__ == "__main__":
     # The Twitter client test is already done during initialization above
@@ -1735,6 +1818,11 @@ if __name__ == "__main__":
             export_response_data()
             print("✅ Step 7 complete!\n")
             
+            # Step 8: Analyze posting patterns
+            print("📊 STEP 8: Analyzing posting patterns...")
+            analyze_posting_patterns()
+            print("✅ Step 8 complete!\n")
+            
             print("🎉 Bot cycle completed successfully!")
             print("📁 Check the 'data/' folder for all generated files.")
             print("🐦 Replies have been automatically posted to Twitter!")
@@ -1747,10 +1835,10 @@ if __name__ == "__main__":
     # Run initial cycle
     run_bot_cycle()
     
-    # Schedule to run every 6 hours (more conservative)
-    schedule.every(6).hours.do(run_bot_cycle)
+    # Schedule to run every 4 hours (optimized for more activity)
+    schedule.every(BOT_CYCLE_HOURS).hours.do(run_bot_cycle)
     
-    print(f"\n📅 Bot scheduled to run every 6 hours")
+    print(f"\n📅 Bot scheduled to run every {BOT_CYCLE_HOURS} hours")
     print("🔄 Bot is now running continuously...")
     print("⏹️  Press Ctrl+C to stop")
     
