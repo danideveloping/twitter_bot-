@@ -1,4 +1,25 @@
 services:
+  - type: web
+    name: twitter-bot-dashboard
+    runtime: python
+    pythonVersion: "3.12"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    autoDeploy: true
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TWITTER_API_KEY
+        sync: false
+      - key: TWITTER_API_SECRET
+        sync: false
+      - key: TWITTER_ACCESS_TOKEN
+        sync: false
+      - key: TWITTER_ACCESS_SECRET
+        sync: false
+      - key: TWITTER_BEARER_TOKEN
+        sync: false
+
   - type: worker
     name: twitter-bot
     runtime: python

@@ -7,11 +7,11 @@ import time
 
 app = Flask(__name__)
 
-# File paths (point to parent directory where bot creates data)
-POSTED_REPLIES_PATH = "../data/posted_replies.csv"
-REPLY_URLS_PATH = "../data/reply_urls.txt"
-ENGAGEMENT_METRICS_PATH = "../data/engagement_metrics.csv"
-RESPONSES_TRACKING_PATH = "../data/responses_tracking.csv"
+# File paths (point to data directory where bot creates data)
+POSTED_REPLIES_PATH = "data/posted_replies.csv"
+REPLY_URLS_PATH = "data/reply_urls.txt"
+ENGAGEMENT_METRICS_PATH = "data/engagement_metrics.csv"
+RESPONSES_TRACKING_PATH = "data/responses_tracking.csv"
 
 @app.route('/')
 def dashboard():
@@ -20,7 +20,10 @@ def dashboard():
 
 @app.route('/api/replies')
 def get_replies():
-    """API endpoint to get posted replies"""
+    """API endpoint to get posted replies with pagination"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
     replies = []
     
     if os.path.exists(POSTED_REPLIES_PATH):
@@ -45,11 +48,30 @@ def get_replies():
     # Sort by timestamp (newest first)
     replies.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
     
-    return jsonify(replies)
+    # Pagination
+    total = len(replies)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_replies = replies[start:end]
+    
+    return jsonify({
+        'replies': paginated_replies,
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page,
+            'has_next': end < total,
+            'has_prev': page > 1
+        }
+    })
 
 @app.route('/api/urls')
 def get_urls():
-    """API endpoint to get reply URLs"""
+    """API endpoint to get reply URLs with pagination"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    
     urls = []
     
     if os.path.exists(REPLY_URLS_PATH):
@@ -59,11 +81,30 @@ def get_urls():
         except Exception as e:
             print(f"Error reading URLs: {e}")
     
-    return jsonify(urls)
+    # Pagination
+    total = len(urls)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_urls = urls[start:end]
+    
+    return jsonify({
+        'urls': paginated_urls,
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page,
+            'has_next': end < total,
+            'has_prev': page > 1
+        }
+    })
 
 @app.route('/api/engagement')
 def get_engagement():
-    """API endpoint to get engagement metrics"""
+    """API endpoint to get engagement metrics with pagination"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 15, type=int)
+    
     engagement = []
     
     if os.path.exists(ENGAGEMENT_METRICS_PATH):
@@ -85,11 +126,33 @@ def get_engagement():
         except Exception as e:
             print(f"Error reading engagement: {e}")
     
-    return jsonify(engagement)
+    # Sort by timestamp (newest first)
+    engagement.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    
+    # Pagination
+    total = len(engagement)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_engagement = engagement[start:end]
+    
+    return jsonify({
+        'engagement': paginated_engagement,
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page,
+            'has_next': end < total,
+            'has_prev': page > 1
+        }
+    })
 
 @app.route('/api/responses')
 def get_responses():
-    """API endpoint to get responses to bot tweets"""
+    """API endpoint to get responses to bot tweets with pagination"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
     responses = []
     
     if os.path.exists(RESPONSES_TRACKING_PATH):
@@ -100,7 +163,27 @@ def get_responses():
         except Exception as e:
             print(f"Error reading responses: {e}")
     
-    return jsonify(responses)
+    # Sort by timestamp if available (newest first)
+    if responses and 'response_created_at' in responses[0]:
+        responses.sort(key=lambda x: x.get('response_created_at', ''), reverse=True)
+    
+    # Pagination
+    total = len(responses)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_responses = responses[start:end]
+    
+    return jsonify({
+        'responses': paginated_responses,
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page,
+            'has_next': end < total,
+            'has_prev': page > 1
+        }
+    })
 
 @app.route('/api/stats')
 def get_stats():

@@ -8,8 +8,8 @@ def run_bot():
     """Run the Twitter bot in a separate process"""
     print("🤖 Starting Twitter Bot...")
     try:
-        # Run bot from parent directory
-        subprocess.run([sys.executable, "../twitter_bot.py"], check=True)
+        # Run bot from current directory
+        subprocess.run([sys.executable, "twitter_bot.py"], check=True)
     except KeyboardInterrupt:
         print("🛑 Bot stopped by user")
     except Exception as e:
@@ -30,8 +30,8 @@ def main():
     print("=" * 50)
     
     # Check if required files exist
-    if not os.path.exists("../twitter_bot.py"):
-        print("❌ twitter_bot.py not found in parent directory!")
+    if not os.path.exists("twitter_bot.py"):
+        print("❌ twitter_bot.py not found!")
         return
     
     if not os.path.exists("app.py"):

@@ -130,6 +130,23 @@
             color: #999;
             font-style: italic;
         }
+        .pagination {
+            margin-bottom: 0;
+        }
+        .pagination .page-link {
+            color: #667eea;
+            border-color: #dee2e6;
+        }
+        .pagination .page-item.active .page-link {
+            background-color: #667eea;
+            border-color: #667eea;
+            color: white;
+        }
+        .pagination .page-link:hover {
+            color: #764ba2;
+            background-color: #e9ecef;
+            border-color: #dee2e6;
+        }
     </style>
 </head>
 <body>
@@ -260,10 +277,63 @@
 
         function loadAllData() {
             loadStats();
-            loadReplies();
-            loadUrls();
-            loadEngagement();
-            loadResponses();
+            loadReplies(currentRepliesPage);
+            loadUrls(currentUrlsPage);
+            loadEngagement(currentEngagementPage);
+            loadResponses(currentResponsesPage);
+        }
+
+        function createPaginationControls(pagination, loadFunction) {
+            const { page, pages, has_next, has_prev } = pagination;
+            
+            let controls = '<div class="d-flex justify-content-center mt-4"><nav><ul class="pagination">';
+            
+            // Previous button
+            if (has_prev) {
+                controls += `<li class="page-item"><a class="page-link" href="#" onclick="${loadFunction}(${page - 1}); return false;">Previous</a></li>`;
+            } else {
+                controls += '<li class="page-item disabled"><span class="page-link">Previous</span></li>';
+            }
+            
+            // Page numbers
+            const startPage = Math.max(1, page - 2);
+            const endPage = Math.min(pages, page + 2);
+            
+            if (startPage > 1) {
+                controls += `<li class="page-item"><a class="page-link" href="#" onclick="${loadFunction}(1); return false;">1</a></li>`;
+                if (startPage > 2) {
+                    controls += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                }
+            }
+            
+            for (let i = startPage; i <= endPage; i++) {
+                if (i === page) {
+                    controls += `<li class="page-item active"><span class="page-link">${i}</span></li>`;
+                } else {
+                    controls += `<li class="page-item"><a class="page-link" href="#" onclick="${loadFunction}(${i}); return false;">${i}</a></li>`;
+                }
+            }
+            
+            if (endPage < pages) {
+                if (endPage < pages - 1) {
+                    controls += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                }
+                controls += `<li class="page-item"><a class="page-link" href="#" onclick="${loadFunction}(${pages}); return false;">${pages}</a></li>`;
+            }
+            
+            // Next button
+            if (has_next) {
+                controls += `<li class="page-item"><a class="page-link" href="#" onclick="${loadFunction}(${page + 1}); return false;">Next</a></li>`;
+            } else {
+                controls += '<li class="page-item disabled"><span class="page-link">Next</span></li>';
+            }
+            
+            controls += '</ul></nav></div>';
+            
+            // Add page info
+            controls += `<div class="text-center mt-2"><small class="text-muted">Page ${page} of ${pages} (${pagination.total} total items)</small></div>`;
+            
+            return controls;
         }
 
         function refreshData() {
@@ -289,10 +359,18 @@
             }
         }
 
-        async function loadReplies() {
+        let currentRepliesPage = 1;
+        let currentUrlsPage = 1;
+        let currentEngagementPage = 1;
+        let currentResponsesPage = 1;
+
+        async function loadReplies(page = 1) {
             try {
-                const response = await fetch('/api/replies');
-                const replies = await response.json();
+                currentRepliesPage = page;
+                const response = await fetch(`/api/replies?page=${page}&per_page=10`);
+                const data = await response.json();
+                const replies = data.replies || [];
+                const pagination = data.pagination || {};
                 
                 const container = document.getElementById('replies-container');
                 
@@ -301,7 +379,7 @@
                     return;
                 }
                 
-                container.innerHTML = replies.map(reply => `
+                let html = replies.map(reply => `
                     <div class="reply-card">
                         <div class="tweet-text">
                             <strong>Original Tweet:</strong> ${reply.original_tweet_text || 'N/A'}
@@ -319,16 +397,26 @@
                         </div>
                     </div>
                 `).join('');
+                
+                // Add pagination controls
+                if (pagination.pages > 1) {
+                    html += createPaginationControls(pagination, 'loadReplies');
+                }
+                
+                container.innerHTML = html;
             } catch (error) {
                 console.error('Error loading replies:', error);
                 document.getElementById('replies-container').innerHTML = '<div class="alert alert-danger">Error loading replies</div>';
             }
         }
 
-        async function loadUrls() {
+        async function loadUrls(page = 1) {
             try {
-                const response = await fetch('/api/urls');
-                const urls = await response.json();
+                currentUrlsPage = page;
+                const response = await fetch(`/api/urls?page=${page}&per_page=20`);
+                const data = await response.json();
+                const urls = data.urls || [];
+                const pagination = data.pagination || {};
                 
                 const container = document.getElementById('urls-container');
                 
@@ -337,24 +425,34 @@
                     return;
                 }
                 
-                container.innerHTML = urls.map((url, index) => `
+                let html = urls.map((url, index) => `
                     <div class="url-card">
                         <div class="d-flex justify-content-between align-items-center">
-                            <span class="badge bg-primary me-2">${index + 1}</span>
+                            <span class="badge bg-primary me-2">${(page - 1) * 20 + index + 1}</span>
                             <a href="${url}" target="_blank" class="url-link">${url}</a>
                         </div>
                     </div>
                 `).join('');
+                
+                // Add pagination controls
+                if (pagination.pages > 1) {
+                    html += createPaginationControls(pagination, 'loadUrls');
+                }
+                
+                container.innerHTML = html;
             } catch (error) {
                 console.error('Error loading URLs:', error);
                 document.getElementById('urls-container').innerHTML = '<div class="alert alert-danger">Error loading URLs</div>';
             }
         }
 
-        async function loadEngagement() {
+        async function loadEngagement(page = 1) {
             try {
-                const response = await fetch('/api/engagement');
-                const engagement = await response.json();
+                currentEngagementPage = page;
+                const response = await fetch(`/api/engagement?page=${page}&per_page=15`);
+                const data = await response.json();
+                const engagement = data.engagement || [];
+                const pagination = data.pagination || {};
                 
                 const container = document.getElementById('engagement-container');
                 
@@ -363,7 +461,7 @@
                     return;
                 }
                 
-                container.innerHTML = engagement.map(record => `
+                let html = engagement.map(record => `
                     <div class="engagement-card">
                         <div class="row">
                             <div class="col-md-3">
@@ -387,16 +485,26 @@
                         </div>
                     </div>
                 `).join('');
+                
+                // Add pagination controls
+                if (pagination.pages > 1) {
+                    html += createPaginationControls(pagination, 'loadEngagement');
+                }
+                
+                container.innerHTML = html;
             } catch (error) {
                 console.error('Error loading engagement:', error);
                 document.getElementById('engagement-container').innerHTML = '<div class="alert alert-danger">Error loading engagement data</div>';
             }
         }
 
-        async function loadResponses() {
+        async function loadResponses(page = 1) {
             try {
-                const response = await fetch('/api/responses');
-                const responses = await response.json();
+                currentResponsesPage = page;
+                const response = await fetch(`/api/responses?page=${page}&per_page=10`);
+                const data = await response.json();
+                const responses = data.responses || [];
+                const pagination = data.pagination || {};
                 
                 const container = document.getElementById('responses-container');
                 
@@ -405,7 +513,7 @@
                     return;
                 }
                 
-                container.innerHTML = responses.map(response => `
+                let html = responses.map(response => `
                     <div class="response-card">
                         <div class="reply-text">
                             <strong>Response:</strong> ${response.response_text || 'N/A'}
@@ -416,6 +524,13 @@
                         </div>
                     </div>
                 `).join('');
+                
+                // Add pagination controls
+                if (pagination.pages > 1) {
+                    html += createPaginationControls(pagination, 'loadResponses');
+                }
+                
+                container.innerHTML = html;
             } catch (error) {
                 console.error('Error loading responses:', error);
                 document.getElementById('responses-container').innerHTML = '<div class="alert alert-danger">Error loading responses</div>';
