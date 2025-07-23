@@ -4,7 +4,7 @@ services:
     runtime: python
     pythonVersion: "3.12"
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app"
+    startCommand: "python start_dashboard.py"
     autoDeploy: true
     envVars:
       - key: OPENAI_API_KEY
