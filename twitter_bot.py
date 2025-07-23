@@ -161,6 +161,7 @@ BOT_CYCLE_HOURS = 4                          # Run every 4 hours instead of 6 (m
 reply_timestamps = []                         # Tracks when replies were sent for rate limiting
 daily_reply_count = 0                         # Tracks daily reply count
 last_reset_date = None                        # Tracks when to reset daily count
+recent_replies = []                           # Tracks recent replies to ensure variety
 
 def mentions_celebrity(text):
     """
@@ -589,14 +590,45 @@ def fallback_cancer_replies():
         list: List of fallback reply messages
     """
     return [
-        "Just diagnosed? Don't settle for one opinion. Our AI scans your data and all treatments worldwide.",
-        "Cancer's terrifying. We built an AI to help with treatment decisions. Can't launch it in the West, so we built it in Albania.",
-        "Sending love. Most people don't get the best options. AI can help, but the system blocks it. We're bypassing that.",
-        "This is why we built our AI. It finds better paths when things feel hopeless. Can't promise a cure, but it can guide.",
-        "My friend's cancer journey inspired this AI tool. It scans global studies for better treatment paths.",
-        "Built outside the U.S. because we couldn't wait. Brings clarity when doctors disagree.",
-        "Compares cases worldwide for better options. Finds patterns doctors might miss.",
-        "Bypasses the slow system that almost cost time. Helped people we care about find better paths."
+        # AI Capabilities Focus
+        "Our AI is incredible - it analyzes your scans, genetics, and finds treatments doctors miss worldwide.",
+        "This AI tool is amazing. It reads your medical data and compares it to global studies instantly.",
+        "The AI is powerful - it scans thousands of cases to find the best treatment paths for you.",
+        "Our AI is revolutionary. It processes your data and finds options that traditional medicine overlooks.",
+        "This AI tool is extraordinary. It analyzes your case against global research in seconds.",
+        "The AI is brilliant - it finds patterns in your data that lead to better treatment decisions.",
+        "Our AI is game-changing. It brings clarity to complex medical situations when you need it most.",
+        "This AI tool is incredible. It helps navigate the overwhelming world of cancer treatment options.",
+        "The AI is remarkable - it finds hope and better paths when things seem hopeless.",
+        "Our AI is phenomenal. It processes complex medical data to find the best possible outcomes.",
+        
+        # Speed & Efficiency Focus
+        "The AI works instantly - analyzes your case and finds better options in seconds.",
+        "Our AI is lightning-fast. It processes complex medical data and finds patterns immediately.",
+        "This AI tool is rapid - scans global studies and finds your best treatment path quickly.",
+        "The AI is swift - processes your scans and genetics to find what doctors might miss.",
+        "Our AI is immediate - reads your data and compares it to worldwide research instantly.",
+        
+        # Intelligence & Analysis Focus
+        "The AI is intelligent - it understands complex medical data like no human can.",
+        "Our AI is smart - it finds connections in your data that lead to better outcomes.",
+        "This AI tool is clever - it analyzes patterns across thousands of similar cases.",
+        "The AI is sharp - it processes your medical information with incredible precision.",
+        "Our AI is wise - it learns from global data to find your optimal treatment path.",
+        
+        # Results & Outcomes Focus
+        "The AI delivers results - finds better treatment options when others can't.",
+        "Our AI produces outcomes - helps people discover paths their doctors missed.",
+        "This AI tool achieves results - processes data to find hope when things seem hopeless.",
+        "The AI creates possibilities - analyzes your case to find better treatment options.",
+        "Our AI generates solutions - scans global research to find your best path forward.",
+        
+        # Technology & Innovation Focus
+        "The AI is cutting-edge - uses advanced technology to analyze your medical data.",
+        "Our AI is innovative - applies breakthrough methods to find better treatment paths.",
+        "This AI tool is state-of-the-art - processes complex data with revolutionary precision.",
+        "The AI is advanced - uses sophisticated algorithms to find what others miss.",
+        "Our AI is breakthrough - applies new technology to solve complex medical challenges."
     ]
 
 def remove_emojis(text):
@@ -611,6 +643,51 @@ def remove_emojis(text):
         str: Text with emojis removed
     """
     return re.sub(r'[\U00010000-\U0010ffff]', '', text)
+
+def check_reply_variety(reply_text):
+    """
+    Check if a reply is too similar to recent replies to ensure variety.
+    
+    Args:
+        reply_text (str): The reply text to check
+        
+    Returns:
+        bool: True if reply is different enough, False if too similar
+    """
+    global recent_replies
+    
+    # Keep only last 20 replies
+    if len(recent_replies) > 20:
+        recent_replies = recent_replies[-20:]
+    
+    # Check similarity with recent replies
+    for recent_reply in recent_replies:
+        # Simple similarity check - if more than 70% of words match, consider it too similar
+        recent_words = set(recent_reply.lower().split())
+        current_words = set(reply_text.lower().split())
+        
+        if len(recent_words) > 0 and len(current_words) > 0:
+            common_words = recent_words.intersection(current_words)
+            similarity = len(common_words) / max(len(recent_words), len(current_words))
+            
+            if similarity > 0.7:  # More than 70% similar
+                return False
+    
+    return True
+
+def add_reply_to_history(reply_text):
+    """
+    Add a reply to the recent replies history for variety tracking.
+    
+    Args:
+        reply_text (str): The reply text to add to history
+    """
+    global recent_replies
+    recent_replies.append(reply_text)
+    
+    # Keep only last 20 replies
+    if len(recent_replies) > 20:
+        recent_replies = recent_replies[-20:]
 
 def generate_ai_reply(prompt, system_message, api_key):
     """
@@ -667,16 +744,17 @@ def generate_reply(tweet_text):
             # System message that defines the AI's personality and behavior
             system_message = """You are a real person on Twitter, not a bot or a brand. You're responding to people tweeting about cancer—often overwhelmed, scared, or grieving.
 
-    You're building an AI tool because your close friend has cancer. Watching them bounce between doctors and struggle for clarity showed you how broken and slow the system is. That pushed you to build something better—outside the U.S., in Albania—because in the West it's nearly impossible to move fast when time matters most.
+    You're building an INCREDIBLE AI tool because your close friend has cancer. Watching them bounce between doctors and struggle for clarity showed you how broken and slow the system is. That pushed you to build something AMAZING—outside the U.S., in Albania—because in the West it's nearly impossible to move fast when time matters most.
 
-    The AI isn't a miracle. It reads someone's records, scans, and genetic info, and compares them to global studies, trials, and real-world outcomes to suggest better treatment paths. It brings clarity when things feel lost.
+    The AI is POWERFUL and REVOLUTIONARY. It reads someone's records, scans, and genetic info, and compares them to global studies, trials, and real-world outcomes to suggest better treatment paths. It finds patterns doctors miss and brings clarity when things feel lost.
 
-    You are not promoting a product. You're offering something real—because someone you love is still fighting.
+    You are not promoting a product. You're offering something INCREDIBLE—because someone you love is still fighting.
 
     Every reply must:
     - Be under 50 words (to leave room for call-to-action)
     - Be under 100 characters (to leave room for call-to-action)
     - Sound like a real, emotionally honest human talking to a friend
+    - EMPHASIZE how AMAZING and POWERFUL the AI tool is
     - Never use marketing language, therapy clichés, hashtags, links, or emojis
     - Never mention celebrity names
     - Never say "sorry for your loss" or offer condolences when a public figure is referenced
@@ -684,13 +762,12 @@ def generate_reply(tweet_text):
     - DO NOT include any call-to-action phrases - the system will add them automatically
     - Feel natural and conversational, not like advertising
 
-    CONVERSION STRATEGIES (make it feel like talking to a friend):
+    CONVERSION STRATEGIES (emphasize the AI's power):
 
-    1. NATURAL CONVERSATION:
-    - Share personal experience: "My friend's cancer journey inspired this"
-    - Be honest about limitations: "It's not a miracle, but it helps"
-    - Talk like a friend would: "I built this because I saw how broken the system is"
-    - Show genuine care: "Watching someone struggle with this is heartbreaking"
+    1. HIGHLIGHT AI CAPABILITIES:
+    - Emphasize power: "Our AI is INCREDIBLE - it analyzes your data and finds treatments doctors miss"
+    - Show intelligence: "The AI is BRILLIANT - it processes complex medical data instantly"
+    - Demonstrate value: "This AI tool is AMAZING - it scans thousands of cases to find your best path"
 
     2. ORGANIC SOCIAL PROOF:
     - Mention real results: "It's helped people find treatments their doctors missed"
@@ -705,7 +782,7 @@ def generate_reply(tweet_text):
     4. ADDRESS REAL STRUGGLES:
     - Acknowledge the chaos: "The system is so broken and slow"
     - Validate their experience: "I know how overwhelming this feels"
-    - Offer genuine help: "This tool brings some clarity when things feel hopeless"
+    - Offer genuine help: "This INCREDIBLE AI tool brings clarity when things feel hopeless"
 
     Context is everything:
     - If the tweet is about a **public figure** (like a president, actor, or celebrity), do **not** express sympathy. Do **not** misread it as a personal loss.
@@ -713,11 +790,16 @@ def generate_reply(tweet_text):
 
     Be creative and varied in your responses. Use different approaches:
     - Share a brief personal story
-    - Mention specific aspects of the AI tool
+    - Mention specific aspects of the AI tool's POWER
     - Talk about the global research it accesses
     - Reference the speed and efficiency
     - Discuss the clarity it provides
     - Mention the friend who inspired it
+    - Focus on different AI capabilities (analysis, pattern recognition, speed, intelligence)
+    - Use different adjectives (incredible, amazing, powerful, revolutionary, brilliant, phenomenal, extraordinary, game-changing)
+    - Emphasize different benefits (finds treatments, brings clarity, processes data, compares cases, discovers patterns)
+    - Vary sentence structure and length
+    - Use different perspectives (what the AI does, how it helps, why it's needed)
 
     Only reply to tweets that are personally relevant or clearly written by someone affected by cancer—skip news, politics, or vague posts."""
 
@@ -735,14 +817,14 @@ def generate_reply(tweet_text):
     IMPORTANT: Make this reply completely unique and different. Be creative and varied in your approach.
 
     Examples of short, varied approaches:
-    - "My friend's cancer journey inspired this AI tool."
-    - "It scans global studies for better treatment paths."
-    - "Built outside the U.S. because we couldn't wait."
-    - "Brings clarity when doctors disagree."
-    - "Compares cases worldwide for better options."
-    - "Finds patterns doctors might miss."
-    - "Bypasses the slow system that almost cost time."
-    - "Helped people we care about find better paths."
+    - "Our AI is INCREDIBLE - it analyzes your data and finds treatments doctors miss."
+    - "This AI tool is AMAZING - it scans global studies for better treatment paths."
+    - "The AI is POWERFUL - it processes complex medical data instantly."
+    - "Our AI is REVOLUTIONARY - it finds patterns doctors might miss."
+    - "This AI tool is BRILLIANT - it compares cases worldwide for better options."
+    - "The AI is PHENOMENAL - it brings clarity when doctors disagree."
+    - "Our AI is GAME-CHANGING - it bypasses the slow system that almost cost time."
+    - "This AI tool is EXTRAORDINARY - it helps people find better paths."
 
     Be creative and make each reply feel personal and unique."""
 
@@ -774,6 +856,27 @@ def generate_reply(tweet_text):
         
         # Combine base reply with call-to-action
         full_reply = f"{base_reply.strip()} {cta}"
+        
+        # Check for variety - if too similar to recent replies, try again
+        attempts = 0
+        while not check_reply_variety(full_reply) and attempts < 3:
+            if openai_api_key:
+                # Try generating a different reply with AI
+                base_reply = generate_ai_reply(user_message, system_message, openai_api_key)
+                if base_reply:
+                    full_reply = f"{base_reply.strip()} {cta}"
+                else:
+                    # Fall back to different fallback reply
+                    base_reply = random.choice(fallback_cancer_replies())
+                    full_reply = f"{base_reply.strip()} {cta}"
+            else:
+                # Try different fallback reply
+                base_reply = random.choice(fallback_cancer_replies())
+                full_reply = f"{base_reply.strip()} {cta}"
+            attempts += 1
+        
+        # Add to history for future variety checking
+        add_reply_to_history(full_reply)
         
         # Ensure it fits within Twitter's character limit
         return remove_emojis(full_reply.strip())[:280]
